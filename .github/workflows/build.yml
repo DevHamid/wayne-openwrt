@@ -1,0 +1,150 @@
+name: Build OpenWrt Wayne
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            cpio zip unzip wget python3 libncurses5-dev libssl-dev bc flex bison \
+            libelf-dev lz4 ccache
+
+      # ---- Toolchain: EXACT same combo as DevHamid/Kernel_Action (proven) ----
+      - name: Download AOSP clang (r547379)
+        run: |
+          mkdir -p tc/clang-aosp
+          wget -q -O clang.tar.gz \
+            "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r547379.tar.gz"
+          tar -C tc/clang-aosp -xzf clang.tar.gz
+          ls tc/clang-aosp/bin/ | head -5
+
+      - name: Download AOSP gcc (android-12.1.0_r27)
+        run: |
+          mkdir -p tc/gcc-64 tc/gcc-32
+          wget -q -O gcc64.tar.gz \
+            "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz"
+          tar -C tc/gcc-64 -xzf gcc64.tar.gz
+          wget -q -O gcc32.tar.gz \
+            "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz"
+          tar -C tc/gcc-32 -xzf gcc32.tar.gz
+          echo "GCC_64=CROSS_COMPILE=$PWD/tc/gcc-64/bin/aarch64-linux-android-" >> $GITHUB_ENV
+          echo "GCC_32=CROSS_COMPILE_ARM32=$PWD/tc/gcc-32/bin/arm-linux-androideabi-" >> $GITHUB_ENV
+
+      - name: Download ImmortalWrt rootfs (21.02.7 armvirt/64)
+        run: |
+          mkdir -p rootfs
+          wget -q \
+            https://downloads.immortalwrt.org/releases/21.02.7/targets/armvirt/64/immortalwrt-21.02.7-armvirt-64-default-rootfs.tar.gz \
+            -O rootfs/openwrt-rootfs.tar.gz
+          ls -lh rootfs/openwrt-rootfs.tar.gz
+
+      - name: Download busybox-static (aarch64, Alpine prebuilt)
+        run: |
+          mkdir -p tc
+          wget -q \
+            https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/busybox-static-1.37.0-r20.apk \
+            -O tc/busybox.apk
+          # .apk is a tar.gz: bin/busybox.static inside (verified layout)
+          tar -xzf tc/busybox.apk -C tc bin/busybox.static
+          mv tc/bin/busybox.static tc/busybox
+          chmod +x tc/busybox
+          # Runner is x86_64; this AArch64 binary must NOT execute here.
+          readelf -h tc/busybox | grep 'Machine:.*AArch64'
+
+      - name: Assemble debug initramfs (tiny shell)
+        run: |
+          mkdir -p build/debug/bin build/debug/dev build/debug/proc build/debug/sys build/debug/tmp build/debug/etc
+          cp tc/busybox build/debug/bin/busybox
+          for applet in sh ash mount umount mknod ls cat dmesg head tail sleep echo mkdir ln rm grep setsid cttyhack reboot poweroff; do
+            ln -sf busybox build/debug/bin/$applet
+          done
+          cp overlay-debug/init build/debug/init
+          chmod +x build/debug/init
+          (cd build/debug && find . -print0 | cpio --null -o --format=newc 2>/dev/null | gzip -9 > ../debug-initramfs.cpio.gz)
+          ls -lh build/debug-initramfs.cpio.gz
+
+      - name: Assemble OpenWrt initramfs (full rootfs)
+        run: |
+          mkdir -p build/openwrt
+          cd build/openwrt
+          tar xzf ../../rootfs/openwrt-rootfs.tar.gz
+          # Ensure /bin/sh exists for our /init shebang (busybox provides it)
+          ln -sf busybox bin/sh
+          # Serial login on the g_serial gadget console
+          # (format: id:runlevels:action:process -- matches existing ttyS0 line)
+          echo 'ttyGS0::askfirst:/usr/libexec/login.sh' >> etc/inittab
+          # Inject our /init wrapper (kernel -> procd handoff)
+          cp ../../overlay-openwrt/init init
+          chmod +x init
+          # Safety net: a known-good static shell next to OpenWrt's busybox
+          cp ../../tc/busybox bin/busybox-static
+          chmod +x bin/busybox-static
+          (find . -print0 | cpio --null -o --format=newc 2>/dev/null | gzip -9 > ../openwrt-initramfs.cpio.gz)
+          ls -lh ../openwrt-initramfs.cpio.gz
+
+      - name: Clone kernel source (shallow)
+        run: |
+          git clone --depth=1 \
+            https://github.com/DevHamid/LKGeek_sdm660.git \
+            -b build-all-rekernel kernel
+
+      - name: Apply OpenWrt config fragment
+        run: |
+          cd kernel
+          cat ../kernel-config-fragment.txt >> arch/arm64/configs/vendor/wayne-oss-perf_defconfig
+          echo "--- last 12 lines of defconfig now: ---"
+          tail -n 12 arch/arm64/configs/vendor/wayne-oss-perf_defconfig
+
+      - name: Download mkbootimg tools
+        run: |
+          git clone --depth=1 https://android.googlesource.com/platform/system/tools/mkbootimg mkboot -b master-kernel-build-2022
+
+      - name: Build kernel (Image.gz-dtb, clang — same recipe as Kernel_Action)
+        run: |
+          cd kernel
+          export PATH="$GITHUB_WORKSPACE/tc/clang-aosp/bin:$PATH"
+          export KBUILD_BUILD_HOST=Github-Action
+          export CC=clang
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export LD=ld.lld
+          make -j$(nproc) O=out ARCH=arm64 \
+            ${{ env.GCC_64 }} ${{ env.GCC_32 }} \
+            vendor/wayne-oss-perf_defconfig
+          make -j$(nproc) O=out ARCH=arm64 \
+            CC=clang CLANG_TRIPLE=aarch64-linux-gnu- LD=ld.lld \
+            ${{ env.GCC_64 }} ${{ env.GCC_32 }} \
+            Image.gz-dtb dtbs
+          ls -lh out/arch/arm64/boot/Image.gz-dtb
+          ls out/arch/arm64/boot/dts/vendor/qcom/ | grep -i wayne || echo "WARN: wayne dtb missing"
+
+      - name: Pack boot images (kernel + our initramfs)
+        run: |
+          wget -q https://github.com/DevHamid/Kernel_Action/raw/refs/heads/Kernel_Action/boot/boot.img -O donor-boot.img
+          # Proven locally: pack + unpack round-trip, byte-identical kernel/ramdisk.
+          python3 scripts/pack-boot.py mkboot donor-boot.img \
+            kernel/out/arch/arm64/boot/Image.gz-dtb \
+            build/debug-initramfs.cpio.gz build/debug-boot.img
+          python3 scripts/pack-boot.py mkboot donor-boot.img \
+            kernel/out/arch/arm64/boot/Image.gz-dtb \
+            build/openwrt-initramfs.cpio.gz build/openwrt-boot.img
+          ls -lh build/*.img
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wayne-openwrt
+          path: |
+            build/debug-boot.img
+            build/openwrt-boot.img
+            build/debug-initramfs.cpio.gz
+            build/openwrt-initramfs.cpio.gz

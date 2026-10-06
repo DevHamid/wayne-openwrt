@@ -1,0 +1,62 @@
+#!/bin/busybox-static sh
+# /init -- the very first program the kernel runs (PID 1) from the initramfs.
+#
+# SHEBANG NOTE: we hardcode /bin/busybox-static (the static binary we inject)
+# instead of /bin/sh. OpenWrt's /bin/sh is a symlink to its *dynamic* busybox,
+# which needs the musl loader. If that chain ever fails, the kernel panics with
+# "Requested init /init failed" with no output at all. A static shell cannot
+# fail that way -- it has zero library dependencies.
+#
+# WHY THIS FILE EXISTS:
+#   The kernel, after decompressing an initramfs, looks for exactly one file
+#   named /init and executes it. OpenWrt's own first program is /sbin/init
+#   (procd), but the kernel does not know to look there. This tiny wrapper
+#   does the minimum setup the kernel cannot do itself, then hands control
+#   to OpenWrt. Everything else is OpenWrt's job.
+#
+# Serial console: the kernel builds BOTH paths, both added by our fragment:
+#  - CONFIG_USB_G_SERIAL=y  (legacy g_serial; binds automatically at boot)
+#  - CONFIG_USB_CONFIGFS_ACM=y (configfs f_acm; in the kernel source all along,
+#    just never enabled by the vendor defconfig -- our fragment enables it)
+# g_serial is the zero-config path: it creates /dev/ttyGS0 automatically -- a
+# PC sees a CDC-ACM port.
+
+# --- 1. Mount the basics ------------------------------------------------
+mount -t devtmpfs devtmpfs /dev      2>/dev/null
+mount -t proc     proc     /proc
+mount -t sysfs    sysfs    /sys
+mount -t devpts   devpts   /dev/pts  2>/dev/null
+
+[ -e /dev/console ] || mknod -m 600 /dev/console c 5 1
+[ -e /dev/null    ] || mknod -m 666 /dev/null    c 1 3
+
+echo "initramfs: /init reached PID 1"
+
+# --- 2. Wait briefly for the USB serial gadget ----------------------------
+# g_serial is built into the kernel and binds as soon as the USB controller
+# (dwc3) probes. Give it a moment, then tell the world where to look.
+n=0
+while [ ! -e /dev/ttyGS0 ] && [ $n -lt 10 ]; do
+    sleep 1
+    n=$((n+1))
+done
+if [ -e /dev/ttyGS0 ]; then
+    echo "initramfs: USB serial ready (/dev/ttyGS0 -> PC /dev/ttyACM0)" > /dev/ttyGS0
+else
+    echo "initramfs: WARNING -- no /dev/ttyGS0 yet (continuing)"
+fi
+
+echo "initramfs: handing over to OpenWrt /sbin/init"
+
+# --- 3. Hand over ----------------------------------------------------------
+# exec replaces this shell with procd, so procd becomes PID 1. No switch_root:
+# in an initramfs boot, the filesystem we are on IS the real root.
+exec /sbin/init
+
+# If exec failed (missing or wrong-architecture /sbin/init) we land here.
+# PID 1 must never exit (kernel panics on init death), so respawn the shell.
+echo "initramfs: FATAL -- /sbin/init did not start, dropping to shell"
+while true; do
+    /bin/sh
+    echo "(shell exited -- respawning; PID 1 must not die)"
+done

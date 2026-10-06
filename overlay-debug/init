@@ -1,0 +1,87 @@
+#!/bin/sh
+# /init for the DEBUG image.
+# Note: in the debug ramdisk, /bin/sh IS our static busybox symlink, so this
+# shebang is safe. (The full-OpenWrt image uses /bin/busybox-static sh instead
+# because OpenWrt's own /bin/sh is a *dynamic* binary needing the musl loader.)
+#
+# Deliberately NOT OpenWrt. The smallest possible thing that proves the kernel
+# itself boots on wayne hardware. If this works and the full OpenWrt image does
+# not, the fault is in OpenWrt's userspace -- not kernel, not DTB, not bootloader.
+#
+# Serial console: the kernel builds BOTH paths, both added by our fragment:
+#  - CONFIG_USB_G_SERIAL=y  (legacy g_serial; binds automatically at boot)
+#  - CONFIG_USB_CONFIGFS_ACM=y (configfs f_acm; the source always had it,
+#    the vendor defconfig just never enabled it -- our fragment fixes that)
+# g_serial is the zero-config path: it binds the USB-C port automatically and
+# creates /dev/ttyGS0. On a PC it appears as a CDC-ACM port (/dev/ttyACM0/COMx).
+
+mount -t devtmpfs devtmpfs /dev      2>/dev/null
+mount -t proc     proc     /proc
+mount -t sysfs    sysfs    /sys
+mount -t devpts   devpts   /dev/pts  2>/dev/null
+mount -t tmpfs    tmpfs    /tmp
+
+[ -e /dev/console ] || mknod -m 600 /dev/console c 5 1
+[ -e /dev/null    ] || mknod -m 666 /dev/null    c 1 3
+
+exec >/dev/console 2>&1
+
+echo ""
+echo "==================================================="
+echo " wayne-openwrt DEBUG initramfs -- kernel booted OK"
+echo "==================================================="
+
+# --- Wait for the USB serial gadget to come up (g_serial is built-in) -------
+echo "--- waiting for /dev/ttyGS0 (USB serial gadget)... ---"
+n=0
+while [ ! -e /dev/ttyGS0 ] && [ $n -lt 20 ]; do
+    sleep 1
+    n=$((n+1))
+done
+if [ -e /dev/ttyGS0 ]; then
+    echo "USB serial ready. Plug into a PC and open /dev/ttyACM0 (or COMx)."
+else
+    echo "WARNING: no /dev/ttyGS0 after 20s -- continuing without USB serial."
+fi
+
+# --- Dump what the kernel found. This is the evidence we debug with. --------
+echo ""
+echo "--- kernel version ---"
+cat /proc/version
+echo ""
+echo "--- device tree model (proves the wayne DTB was selected) ---"
+cat /proc/device-tree/model 2>/dev/null; echo ""
+echo ""
+echo "--- block devices (eMMC = mmcblk0 + partitions) ---"
+cat /proc/partitions
+echo ""
+echo "--- by-name partition symlinks (boot, system, userdata...) ---"
+ls -l /dev/block/bootdevice/by-name/ 2>/dev/null || echo "  (no by-name dir)"
+echo ""
+echo "--- USB device controller (dwc3 wired to USB-C) ---"
+ls /sys/class/udc/ 2>/dev/null || echo "  (no UDC -- gadget cannot start)"
+echo ""
+echo "--- memory ---"
+head -n 3 /proc/meminfo
+echo ""
+echo "--- dmesg tail ---"
+dmesg 2>/dev/null | tail -n 25
+echo ""
+echo "==================================================="
+echo " Debug shell. Useful:"
+echo "   dmesg | less"
+echo "   ls /sys/bus/platform/devices"
+echo "   cat /proc/partitions"
+echo "   reboot"
+echo "==================================================="
+
+# Interactive shell on the USB serial port (background) and on console.
+if [ -e /dev/ttyGS0 ]; then
+    setsid cttyhack /bin/sh < /dev/ttyGS0 > /dev/ttyGS0 2>&1 &
+fi
+# PID 1 must never exit: if the last shell dies, the kernel panics with
+# "Attempted to kill init!". Loop so 'exit' just respawns a fresh shell.
+while true; do
+    /bin/sh
+    echo "(shell exited -- respawning; PID 1 must not die)"
+done
