@@ -28,17 +28,27 @@ jobs:
           tar -C tc/clang-aosp -xzf clang.tar.gz
           ls tc/clang-aosp/bin/ | head -5
 
-      - name: Download AOSP gcc (android-12.1.0_r27)
+      - name: Download AOSP gcc (android-12.1.0_r27) — EXACT Ka_build.yml recipe
         run: |
           mkdir -p tc/gcc-64 tc/gcc-32
-          wget -q -O gcc64.tar.gz \
+          # Download from android.googlesource.com (same URLs as Ka_build.yml lines 139-147)
+          wget -q -O gcc-aarch64.tar.gz \
             "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz"
-          tar -C tc/gcc-64 -xzf gcc64.tar.gz
-          wget -q -O gcc32.tar.gz \
+          tar -C tc/gcc-64/ -zxvf gcc-aarch64.tar.gz
+          # Check structure: what's inside?
+          ls tc/gcc-64/
+          
+          wget -q -O gcc-arm.tar.gz \
             "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz"
-          tar -C tc/gcc-32 -xzf gcc32.tar.gz
-          echo "GCC_64=CROSS_COMPILE=$PWD/tc/gcc-64/bin/aarch64-linux-android-" >> $GITHUB_ENV
-          echo "GCC_32=CROSS_COMPILE_ARM32=$PWD/tc/gcc-32/bin/arm-linux-androideabi-" >> $GITHUB_ENV
+          tar -C tc/gcc-32/ -zxvf gcc-arm.tar.gz
+          ls tc/gcc-32/
+          
+          # Set CROSS_COMPILE for 64-bit and 32-bit (Ka_build.yml pattern)
+          echo "GCC_64=CROSS_COMPILE=$GITHUB_WORKSPACE/tc/gcc-64/bin/aarch64-linux-android-" >> $GITHUB_ENV
+          echo "GCC_32=CROSS_COMPILE_ARM32=$GITHUB_WORKSPACE/tc/gcc-32/bin/arm-linux-androideabi-" >> $GITHUB_ENV
+          # Verify binaries exist
+          ls -l tc/gcc-64/bin/ | grep gcc || echo "ERROR: gcc binary NOT in bin/"
+          ls -l tc/gcc-32/bin/ | grep gcc || echo "ERROR: gcc binary NOT in bin/"
 
       - name: Download ImmortalWrt rootfs (21.02.7 armvirt/64)
         run: |
@@ -92,11 +102,17 @@ jobs:
           (find . -print0 | cpio --null -o --format=newc 2>/dev/null | gzip -9 > ../openwrt-initramfs.cpio.gz)
           ls -lh ../openwrt-initramfs.cpio.gz
 
-      - name: Clone kernel source (shallow)
+      - name: Clone kernel source (with KernelSU submodule)
         run: |
-          git clone --depth=1 \
+          git clone --recurse-submodules --depth=1 \
             https://github.com/DevHamid/LKGeek_sdm660.git \
             -b build-all-rekernel kernel
+          # drivers/kernelsu is a SYMLINK into the KernelSU submodule; a broken
+          # symlink makes drivers/Kconfig:242 fail with "can't open file".
+          test -f kernel/drivers/kernelsu/Kconfig \
+            || { echo "FATAL: drivers/kernelsu/Kconfig missing (submodule fetch failed)"; \
+                 ls -la kernel/drivers/kernelsu; exit 1; }
+          echo "KernelSU Kconfig present:"; head -5 kernel/drivers/kernelsu/Kconfig
 
       - name: Apply OpenWrt config fragment
         run: |
@@ -114,10 +130,11 @@ jobs:
           cd kernel
           export PATH="$GITHUB_WORKSPACE/tc/clang-aosp/bin:$PATH"
           export KBUILD_BUILD_HOST=Github-Action
-          export CC=clang
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-          export LD=ld.lld
+          # CC/LD/CLANG_TRIPLE must be COMMAND-LINE make args, not exports:
+          # kernel Makefile uses plain '=' (recursive), which exports do NOT override.
+          # Kernel_Action line 262 passes CC=clang on BOTH defconfig and build commands.
           make -j$(nproc) O=out ARCH=arm64 \
+            CC=clang CLANG_TRIPLE=aarch64-linux-gnu- LD=ld.lld \
             ${{ env.GCC_64 }} ${{ env.GCC_32 }} \
             vendor/wayne-oss-perf_defconfig
           make -j$(nproc) O=out ARCH=arm64 \

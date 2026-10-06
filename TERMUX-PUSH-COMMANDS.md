@@ -18,7 +18,7 @@ cd ~
 mkdir -p wayne-openwrt-tmp
 cd wayne-openwrt-tmp
 # the ZIP you saved from Telegram — adjust the path if it landed elsewhere
-unzip ~/storage/downloads/wayne-openwrt-v0.2.zip
+unzip ~/storage/downloads/wayne-openwrt-v0.4.zip
 ```
 
 ## 3. Clone YOUR empty repo, then copy the kit in
