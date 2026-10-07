@@ -42,7 +42,12 @@ CONFIG_NF_TABLES=y
 CONFIG_NF_NAT=y
 CONFIG_NETFILTER_XTABLES=y
 CONFIG_NETFILTER_XT_MATCH_CONNTRACK=y
-CONFIG_NETFILTER_XT_TARGET_LOG=y
+# NOTE: CONFIG_NETFILTER_XT_TARGET_LOG is intentionally NOT set. This LKGeek tree
+# only builds the nf_log core (nf_log.o) when DEBUG_KERNEL=y (net/netfilter/Makefile
+# line 4), and the vendor defconfig leaves DEBUG_KERNEL off. Enabling XT_TARGET_LOG
+# compiles nf_log_ipv4/ipv6/xt_LOG which reference missing nf_log_* symbols and
+# fails the final vmlinux link. Add both (LOG + DEBUG_KERNEL) only if firewall
+# LOG rules are ever needed.
 CONFIG_NETFILTER_XT_TARGET_MASQUERADE=y
 
 # IPv6: OpenWrt defaults to dual-stack.
