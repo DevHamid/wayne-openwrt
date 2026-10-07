@@ -154,6 +154,21 @@ jobs:
           python3 scripts/pack-boot.py mkboot donor-boot.img \
             kernel/out/arch/arm64/boot/Image.gz-dtb \
             build/openwrt-initramfs.cpio.gz build/openwrt-boot.img
+          # --- BISECT 1: OUR kernel + DONOR's known-good Android ramdisk ---
+          # Donor boots fine (tested on-device). debug/openwrt images fail.
+          # If bisect-kernel.img ALSO loops -> our KERNEL is the problem.
+          # If it boots (Android starts) -> our kernel is fine, initramfs is.
+          python3 mkboot/unpack_bootimg.py --boot_img donor-boot.img --out donor-unpacked
+          python3 scripts/pack-boot.py mkboot donor-boot.img \
+            kernel/out/arch/arm64/boot/Image.gz-dtb \
+            donor-unpacked/ramdisk build/bisect-kernel.img
+          # --- BISECT 2: DONOR's known-good kernel + OUR debug initramfs ---
+          # If this loops -> our initramfs/init script is the problem.
+          # If it sticks on logo WITHOUT looping -> initramfs is fine
+          # (PID 1 alive, just invisible -- kernel has no framebuffer console).
+          python3 scripts/pack-boot.py mkboot donor-boot.img \
+            donor-unpacked/kernel \
+            build/debug-initramfs.cpio.gz build/bisect-initramfs.img
           ls -lh build/*.img
 
       - name: Upload artifacts
@@ -163,5 +178,7 @@ jobs:
           path: |
             build/debug-boot.img
             build/openwrt-boot.img
+            build/bisect-kernel.img
+            build/bisect-initramfs.img
             build/debug-initramfs.cpio.gz
             build/openwrt-initramfs.cpio.gz

@@ -24,6 +24,25 @@ Two boot images are produced per build:
 |---|---|---|
 | `debug-boot.img` | kernel + tiny busybox shell (~1 MB ramdisk) | Proves the kernel itself boots on wayne. Dumps device tree, partitions, USB state to a serial console. |
 | `openwrt-boot.img` | kernel + full OpenWrt rootfs (~7 MB ramdisk, ~20 MB total) | The real thing. If debug boots and this doesn't, the problem is OpenWrt's userspace, not the kernel. |
+| `bisect-kernel.img` | OUR kernel + DONOR's Android ramdisk | Splits kernel vs initramfs faults: boots Android → kernel fine; loops → kernel at fault. |
+| `bisect-initramfs.img` | DONOR kernel + OUR debug initramfs | Splits the other way: loops → initramfs at fault; stuck-on-logo → PID 1 alive but invisible. |
+
+## Boot failure troubleshooting (no console on this hardware)
+
+This kernel has no framebuffer console (`CONFIG_VT=n`), so a working boot can look
+like "stuck on Mi logo". Distinguish failure modes:
+
+| Symptom | Meaning | Next step |
+|---|---|---|
+| Bootloop (logo reappears) | Kernel panic → instant reboot (`PANIC_ON_OOPS` + watchdog bite) | Try the bisect images below |
+| Stuck on logo, no loop | PID 1 is alive and running headless | Check USB serial on a PC, or try the bisect images |
+
+Every build ships two extra diagnostic images for splitting kernel vs initramfs faults:
+
+| Image | Kernel | Ramdisk | Tells us |
+|---|---|---|---|
+| `bisect-kernel.img` | OUR build | DONOR's Android ramdisk | Boots Android → our kernel fine, fault is our initramfs. Loops → our kernel at fault. |
+| `bisect-initramfs.img` | DONOR's | OUR debug initramfs | Loops → our initramfs at fault. Stuck on logo → our initramfs's PID 1 is alive, just invisible. |
 
 ## Files in this repo
 
