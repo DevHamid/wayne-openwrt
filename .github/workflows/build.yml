@@ -35,14 +35,13 @@ jobs:
           wget -q -O gcc-aarch64.tar.gz \
             "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz"
           tar -C tc/gcc-64/ -zxvf gcc-aarch64.tar.gz
-          # Check structure: what's inside?
           ls tc/gcc-64/
-          
+
           wget -q -O gcc-arm.tar.gz \
             "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz"
           tar -C tc/gcc-32/ -zxvf gcc-arm.tar.gz
           ls tc/gcc-32/
-          
+
           # Set CROSS_COMPILE for 64-bit and 32-bit (Ka_build.yml pattern)
           echo "GCC_64=CROSS_COMPILE=$GITHUB_WORKSPACE/tc/gcc-64/bin/aarch64-linux-android-" >> $GITHUB_ENV
           echo "GCC_32=CROSS_COMPILE_ARM32=$GITHUB_WORKSPACE/tc/gcc-32/bin/arm-linux-androideabi-" >> $GITHUB_ENV
@@ -125,6 +124,33 @@ jobs:
         run: |
           git clone --depth=1 https://android.googlesource.com/platform/system/tools/mkbootimg mkboot -b master-kernel-build-2022
 
+      # ---- v0.7 DONOR CONTROL -------------------------------------------------
+      # Repack the donor's KNOWN-GOOD payload (donor kernel + donor Android
+      # ramdisk) through OUR packer. No kernel build involved.
+      # Device test of THIS image answers one question:
+      #   boots    -> our packer produces bootloader-acceptable images;
+      #               the failures must come from kernel/initramfs payloads.
+      #   bootloops-> our packer/header output is rejected on-device despite
+      #               being byte-faithful to the donor on the host.
+      # Donor URL is PINNED to commit c947c2c (the exact boot.img proven to
+      # boot on this phone) so the control cannot drift with the branch.
+      - name: Donor control (repack known-good donor payload, no kernel build)
+        run: |
+          wget -q https://github.com/DevHamid/Kernel_Action/raw/c947c2c04f1445437f507f2b138c34e918d3d54f/boot/boot.img -O donor-boot.img
+          python3 mkboot/unpack_bootimg.py --boot_img donor-boot.img --out donor-unpacked
+          python3 scripts/pack-boot.py mkboot donor-boot.img \
+            donor-unpacked/kernel donor-unpacked/ramdisk build/donor-control.img
+          # Host-level faithfulness gate (real prefix + zero tail), per round-trip rule
+          python3 - <<'PYEOF'
+          import pathlib
+          donor = pathlib.Path('donor-boot.img').read_bytes()
+          rep   = pathlib.Path('build/donor-control.img').read_bytes()
+          assert donor[:len(rep)] == rep, "repacked image diverges from donor real bytes"
+          assert set(donor[len(rep):]) <= {0}, "donor tail is not zero padding"
+          print(f"donor-control.img {len(rep)} bytes: byte-faithful to donor prefix")
+          PYEOF
+          ls -lh build/donor-control.img
+
       - name: Build kernel (Image.gz-dtb, clang — same recipe as Kernel_Action)
         run: |
           cd kernel
@@ -146,8 +172,7 @@ jobs:
 
       - name: Pack boot images (kernel + our initramfs)
         run: |
-          wget -q https://github.com/DevHamid/Kernel_Action/raw/refs/heads/Kernel_Action/boot/boot.img -O donor-boot.img
-          # Proven locally: pack + unpack round-trip, byte-identical kernel/ramdisk.
+          # Reuse the SAME pinned donor image as the control step
           python3 scripts/pack-boot.py mkboot donor-boot.img \
             kernel/out/arch/arm64/boot/Image.gz-dtb \
             build/debug-initramfs.cpio.gz build/debug-boot.img
@@ -155,17 +180,10 @@ jobs:
             kernel/out/arch/arm64/boot/Image.gz-dtb \
             build/openwrt-initramfs.cpio.gz build/openwrt-boot.img
           # --- BISECT 1: OUR kernel + DONOR's known-good Android ramdisk ---
-          # Donor boots fine (tested on-device). debug/openwrt images fail.
-          # If bisect-kernel.img ALSO loops -> our KERNEL is the problem.
-          # If it boots (Android starts) -> our kernel is fine, initramfs is.
-          python3 mkboot/unpack_bootimg.py --boot_img donor-boot.img --out donor-unpacked
           python3 scripts/pack-boot.py mkboot donor-boot.img \
             kernel/out/arch/arm64/boot/Image.gz-dtb \
             donor-unpacked/ramdisk build/bisect-kernel.img
           # --- BISECT 2: DONOR's known-good kernel + OUR debug initramfs ---
-          # If this loops -> our initramfs/init script is the problem.
-          # If it sticks on logo WITHOUT looping -> initramfs is fine
-          # (PID 1 alive, just invisible -- kernel has no framebuffer console).
           python3 scripts/pack-boot.py mkboot donor-boot.img \
             donor-unpacked/kernel \
             build/debug-initramfs.cpio.gz build/bisect-initramfs.img
@@ -180,5 +198,6 @@ jobs:
             build/openwrt-boot.img
             build/bisect-kernel.img
             build/bisect-initramfs.img
+            build/donor-control.img
             build/debug-initramfs.cpio.gz
             build/openwrt-initramfs.cpio.gz

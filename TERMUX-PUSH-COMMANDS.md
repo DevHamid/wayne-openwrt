@@ -1,67 +1,53 @@
-# Termux push commands (run these on your tablet)
+# Termux push commands — v0.7 (donor control)
 
-These five commands move the kit from the ZIP into GitHub and start the first build.
-You never run a heavy compile here — Termux only moves files and talks to GitHub.
+Your repo already exists. v0.7 is an UPDATE: it adds one new CI step
+(`donor-control.img`) and one new artifact. Nothing else changes — the init
+scripts and packer are byte-identical to what shipped in v0.6.
 
-## 1. Install git (once)
-
-Vanilla Termux uses `pkg`; inside a proot/chroot distro (root@…) use `apt-get`:
-
-```bash
-pkg install git unzip || apt-get install -y git unzip
-```
-
-## 2. Download and unpack the kit
+## 1. Download and unpack the kit
 
 ```bash
 cd ~
+rm -rf wayne-openwrt-tmp
 mkdir -p wayne-openwrt-tmp
 cd wayne-openwrt-tmp
-# the ZIP you saved from Telegram — adjust the path if it landed elsewhere
-unzip ~/storage/downloads/wayne-openwrt-v0.6.zip
+unzip "$(find /storage/emulated/0 -name 'wayne-openwrt-v0.7.zip' 2>/dev/null | head -1)"
+ls    # MUST show: .github  scripts  overlay-debug  overlay-openwrt  README.md ...
 ```
 
-## 3. Clone YOUR empty repo, then copy the kit in
+If `ls` does not show those folders/files, STOP — nothing was unpacked.
+
+## 2. Copy the kit into your existing clone
 
 ```bash
 cd ~
 git clone https://github.com/DevHamid/wayne-openwrt.git repo
 cp -r wayne-openwrt-tmp/. repo/
 cd repo
+git status    # should list build.yml, README.md as modified
 ```
 
-## 4. Check what git sees (no upload yet — just looking)
-
-```bash
-git status
-```
-
-You should see the kit files listed as untracked:
-`.github/workflows/build.yml`, `scripts/`, `overlay-openwrt/`, `overlay-debug/`,
-`kernel-config-fragment.txt`, `README.md`, `TERMS-OF-DELIVERY.md`.
-
-## 5. Commit and push (this starts the build)
+## 3. Commit and push (this starts the build)
 
 ```bash
 git add .
-git commit -m "First kit: OpenWrt-on-wayne Phase 1 (RAM boot image)"
-git push -u origin main
+git commit -m "v0.7: add donor-control.img (pinned donor repack through our packer)"
+git push origin main
+git log --oneline -1    # MUST show: v0.7: add donor-control.img (pinned donor repack through our packer)
 ```
 
-If git asks for credentials: enter your GitHub username + a
-[personal access token](https://github.com/settings/tokens) (scope `repo`)
-as the password.
+If `git log --oneline -1` does NOT show the v0.7 message, the push failed —
+tell me before opening Actions.
 
-## Watch the build
+## 4. Watch the build
 
-Open https://github.com/DevHamid/wayne-openwrt/actions — the run "Build OpenWrt
-Wayne" should appear. It takes ~20–40 minutes (kernel compile). When the green
-check appears, download the `wayne-openwrt` artifact:
+https://github.com/DevHamid/wayne-openwrt/actions → run "Build OpenWrt Wayne".
+Download artifact `wayne-openwrt` when green. It now contains:
 
-- `debug-boot.img`    — tiny shell, proves kernel boots
-- `openwrt-boot.img`  — full ImmortalWrt in RAM
+- `donor-control.img`  — **TEST THIS ONE ONLY** (the control)
+- debug-boot.img, openwrt-boot.img, bisect-*.img (from before — do NOT test yet)
 
 ## What you will NOT do in Termux
 
-- no `make`, no toolchain, no `apt install clang` — GitHub runs that
-- no flashing from Termux — flashing happens on a PC via fastboot/TWRP later
+- no `make`, no toolchain — GitHub runs the build
+- no flashing from Termux
