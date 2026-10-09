@@ -170,6 +170,27 @@ jobs:
           ls -lh out/arch/arm64/boot/Image.gz-dtb
           ls out/arch/arm64/boot/dts/vendor/qcom/ | grep -i wayne || echo "WARN: wayne dtb missing"
 
+      - name: Dump resolved kernel config (OTG/F2FS/SQUASHFS ground truth)
+        run: |
+          # The fragment is APPENDED to the vendor defconfig, but kconfig may
+          # still drop an option whose dependencies are unmet (e.g. a symbol
+          # that needs a parent we did not enable). This step prints what the
+          # build ACTUALLY resolved, so we stop guessing about OTG support.
+          cd kernel
+          echo "===== USB / OTG / EXTCON / TYPEC ====="
+          grep -E "^(CONFIG_(EXTCON|TYPEC|USB_DWC3|USB_XHCI_HCD|USB_STORAGE|USB_UAS|USB_ACM|USB_OTG|USB_GADGET|USB_CONFIGFS|USB_G_SERIAL|USB_LIBCOMPOSITE)[A-Z0-9_]*)" out/.config | sort | tee ../config-usb.txt
+          echo "===== FILESYSTEMS ====="
+          grep -E "^(CONFIG_(F2FS_FS|EXT4_FS|SQUASHFS|OVERLAY_FS|BLK_DEV_SD|SCSI|VFAT_FS|MSDOS_FS)[A-Z0-9_]*)" out/.config | sort | tee -a ../config-usb.txt
+          echo "===== HARD GATE: DWC3 dual-role + EXTCON must be y ====="
+          for sym in CONFIG_EXTCON CONFIG_USB_DWC3_DUAL_ROLE CONFIG_USB_XHCI_HCD CONFIG_USB_STORAGE CONFIG_BLK_DEV_SD; do
+            if grep -q "^${sym}=y" out/.config; then
+              echo "PASS: ${sym}=y"
+            else
+              echo "FAIL: ${sym} is NOT =y -- OTG host mode will not work"
+              grep -E "^# ${sym} is not set|^${sym}=" out/.config || true
+            fi
+          done
+
       - name: Pack boot images (kernel + our initramfs)
         run: |
           # Reuse the SAME pinned donor image as the control step
@@ -201,3 +222,4 @@ jobs:
             build/donor-control.img
             build/debug-initramfs.cpio.gz
             build/openwrt-initramfs.cpio.gz
+            config-usb.txt

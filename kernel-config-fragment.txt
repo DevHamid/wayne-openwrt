@@ -95,3 +95,54 @@ CONFIG_RD_GZIP=y
 # Kernel config for the debug shell (minimal).
 # These are already in the vendor defconfig but re-affirmed for clarity.
 CONFIG_BLK_DEV_INITRD=y
+
+# ===========================================================================
+# v0.8 -- USB OTG HOST mode + permanent rootfs enablers (Course A)
+# ===========================================================================
+# GOAL: let the phone act as a USB *host* so a USB-OTG stick can hold the
+# persistent rootfs (root=/dev/sda1), and so USB ethernet works later (M5).
+#
+# WHY THESE ARE NEEDED (verified against THIS tree, not from memory):
+#   drivers/usb/dwc3/Kconfig:  USB_DWC3_DUAL_ROLE depends on EXTCON=y
+#     => EXTCON is MANDATORY, not optional.
+#   Vendor defconfig sets NO dwc3 mode, so the `choice` falls back to its
+#   default. We now state DUAL_ROLE explicitly, so host is available while the
+#   g_serial console (device role) keeps working.
+
+# extcon core -- the external-connector class DWC3 dual-role depends on.
+CONFIG_EXTCON=y
+
+# PMIC cable/role detection for Qualcomm PMICs (wayne = PM660/PM660L).
+# "Qualcomm USB extcon support ... SPMI PMIC based USB cable detection".
+CONFIG_EXTCON_QCOM_SPMI_MISC=y
+
+# DWC3 dual role: BOTH host and gadget from the same controller.
+# This is what makes /dev/sda (a USB stick) appear while ttyGS0 stays alive.
+CONFIG_USB_DWC3_DUAL_ROLE=y
+
+# USB core OTG state machine (USB_OTG lives in drivers/usb/core/Kconfig).
+CONFIG_USB_OTG=y
+
+# Type-C port-controller manager; selects USB_ROLE_SWITCH.
+CONFIG_TYPEC_TCPM=y
+
+# Host-mode plumbing. USB_XHCI_HCD + USB_STORAGE + SCSI already =y in the
+# vendor defconfig (lines 607/608/375) -- re-affirmed so a defconfig change
+# can never silently drop our ability to read a USB disk.
+CONFIG_USB_XHCI_HCD=y
+CONFIG_USB_STORAGE=y
+CONFIG_SCSI=y
+CONFIG_BLK_DEV_SD=y
+
+# USB Attached SCSI (faster bulk storage than the old usb-storage path).
+CONFIG_USB_UAS=y
+
+# CDC-ACM as a HOST driver is part of USB_ACM (shared with the gadget side).
+CONFIG_USB_ACM=y
+
+# NOTE on the gadget side: USB_CONFIGFS_MASS_STORAGE (already =y in the vendor
+# defconfig) would let the phone EXPOSE a disk to a PC. That is a different
+# feature from reading a USB stick and is left as-is.
+# The legacy USB_MASS_STORAGE (gadget) is deliberately NOT set: it shares the
+# "precomposed gadgets" single-select choice with USB_G_SERIAL, and setting
+# both makes kconfig silently drop one -- the same trap documented above.
