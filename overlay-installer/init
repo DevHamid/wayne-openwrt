@@ -1,0 +1,133 @@
+#!/bin/busybox-static sh
+# /init for the INSTALLER image (v0.9).
+#
+# STRATEGY: this image is the SAME full OpenWrt initramfs we already boot, with
+# only /init replaced. That matters: mkfs.ext4 / tar / all libraries already
+# exist INSIDE the running system, so we can format the target and copy
+# ourselves onto it with no extra tooling and no chicken-and-egg problem.
+#
+# First boot : format /dev/mmcblk0p64 (userdata) ext4, copy the live rootfs
+#              onto it, write a marker, then switch_root into it.
+# Later boots: marker found -> skip install -> boot straight.
+#
+# WHY userdata (p64): only partition big enough (49 GiB); user confirmed this
+# is a test phone and its Android data is disposable.
+#
+# SAFETY: this file may destroy exactly ONE partition. Guards, in order:
+#   1. target is hardcoded, never derived from a scan
+#   2. it must exist as a block device
+#   3. size must be >= 8 GiB
+#   4. its kernel PARTNAME must be exactly "userdata"
+#   5. a marker file makes the install run AT MOST ONCE
+#   Any failure => drop to a shell without writing anything.
+
+TARGET=/dev/mmcblk0p64
+MNT=/mnt/target
+MARKER=.wayne-openwrt-root
+
+say()   { echo "installer: $*"; }
+fatal() { echo "installer: FATAL -- $*"; echo "installer: NOTHING WRITTEN; dropping to shell"; exec /bin/sh; }
+
+# --- 1. basics -------------------------------------------------------------
+mount -t devtmpfs devtmpfs /dev 2>/dev/null
+mount -t proc     proc     /proc
+mount -t sysfs    sysfs    /sys
+mount -t devpts   devpts   /dev/pts 2>/dev/null
+mount -t tmpfs    tmpfs    /tmp 2>/dev/null
+[ -e /dev/console ] || mknod -m 600 /dev/console c 5 1
+[ -e /dev/null ]    || mknod -m 666 /dev/null c 1 3
+exec >/dev/console 2>&1
+
+echo ""
+echo "====================================================="
+echo " wayne installer initramfs (v0.9) -- PID 1 alive"
+echo "====================================================="
+
+# --- 2. serial console: the user must be able to watch and abort ----------
+n=0; while [ ! -e /dev/ttyGS0 ] && [ $n -lt 20 ]; do sleep 1; n=$((n+1)); done
+if [ -e /dev/ttyGS0 ]; then
+    say "USB serial ready (/dev/ttyGS0 -> PC /dev/ttyACM0)"
+    # No cttyhack/setsid in OpenWrt's busybox: respawn a login shell on the
+    # serial port with a plain background shell. inittab keeps it alive later.
+    ( while true; do /bin/sh < /dev/ttyGS0 > /dev/ttyGS0 2>&1; sleep 1; done ) &
+else
+    say "WARNING: no /dev/ttyGS0 -- output is on the kernel console only"
+fi
+
+SECT=$(cat /sys/class/block/$(basename $TARGET)/size 2>/dev/null)
+NAME=$(cat /sys/class/block/$(basename $TARGET)/uevent 2>/dev/null | sed -n 's/^PARTNAME=//p')
+GIB=$(( ${SECT:-0} / 2 / 1024 / 1024 ))
+
+say "target           : $TARGET"
+say "target name      : ${NAME:-<unknown>}"
+say "target size      : ${GIB} GiB"
+
+# --- 3. GUARDS -------------------------------------------------------------
+[ -b "$TARGET" ]                    || fatal "$TARGET is not a block device"
+[ -n "$SECT" ]                      || fatal "cannot read $TARGET size"
+[ "$GIB" -ge 8 ]                    || fatal "$TARGET is only ${GIB} GiB -- refusing"
+[ "$NAME" = "userdata" ]            || fatal "$TARGET PARTNAME is '$NAME', expected 'userdata'"
+
+# --- 4. marker: install at most once --------------------------------------
+mkdir -p "$MNT"
+ALREADY=0
+if mount -t ext4 "$TARGET" "$MNT" 2>/dev/null; then
+    if [ -f "$MNT/$MARKER" ]; then
+        say "marker found -- rootfs already installed; skipping install"
+        ALREADY=1
+    else
+        say "ext4 with no marker -- will reinstall (this was not our rootfs)"
+        umount "$MNT"
+    fi
+else
+    say "target not mountable as ext4 -- will format"
+fi
+
+# --- 5. install ------------------------------------------------------------
+if [ "$ALREADY" != "1" ]; then
+    say "*** FORMATTING $TARGET ($NAME). Android data on it is lost. ***"
+    /usr/sbin/mkfs.ext4 -F -L wayne-root "$TARGET" || fatal "mkfs.ext4 failed"
+
+    mount -t ext4 "$TARGET" "$MNT" || fatal "mount of formatted target failed"
+
+    say "copying live rootfs -> $MNT (this is the only source of the OS) ..."
+    # tar-pipe the running root. Exclude the virtual/pseudo trees, the mount
+    # point itself, and our installer init (the disk rootfs boots via
+    # /sbin/init, so the initramfs /init is not wanted there).
+    # busybox tar has no --exclude=; it takes an exclude FILE via -X.
+    cat > /tmp/exclude.list <<'EXCL'
+./proc
+./sys
+./dev
+./tmp
+./mnt
+./init
+./rom
+EXCL
+    tar -cf - -C / -X /tmp/exclude.list . | tar -xf - -C "$MNT" || fatal "rootfs copy failed"
+
+    [ -e "$MNT/sbin/init" ] || fatal "copied rootfs has no /sbin/init"
+    [ -e "$MNT/bin/sh" ]    || ln -sf busybox "$MNT/bin/sh"
+
+    # Keep the serial console for the persistent system.
+    if [ -f "$MNT/etc/inittab" ] && ! grep -q ttyGS0 "$MNT/etc/inittab"; then
+        echo 'ttyGS0::respawn:/sbin/askfirst /bin/ash --login' >> "$MNT/etc/inittab"
+    fi
+
+    date > "$MNT/$MARKER" 2>/dev/null || echo installed > "$MNT/$MARKER"
+    sync
+    say "install complete -- marker written"
+fi
+
+# --- 6. hand off -----------------------------------------------------------
+mkdir -p "$MNT/dev" "$MNT/proc" "$MNT/sys" "$MNT/tmp"
+# Clean the target's stale device nodes; the new system mounts its own.
+mount --move /dev  "$MNT/dev"  2>/dev/null
+mount --move /proc "$MNT/proc" 2>/dev/null
+mount --move /sys  "$MNT/sys"  2>/dev/null
+mount --move /tmp  "$MNT/tmp"  2>/dev/null
+
+say "switch_root -> $MNT /sbin/init"
+exec switch_root "$MNT" /sbin/init
+
+fatal "switch_root returned -- /sbin/init did not start"
