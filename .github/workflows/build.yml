@@ -8,6 +8,9 @@ on:
 
 jobs:
   build:
+    # Tags do NOT rebuild -- the release job reuses the main-branch build's
+    # artifacts for the same commit. One commit = one compile, no wasted runs.
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -295,25 +298,57 @@ jobs:
           fi
           echo "OTG hard gate PASSED: all OTG symbols resolved =y"
 
-  # ---- Tag-triggered Release ------------------------------------------------
-  # Push a tag like v0.9.4 and CI builds everything, then publishes a GitHub
+  # ---- Tag-triggered Release (NO rebuild) ----------------------------------
+  # Push a tag like `git tag v0.9.5 && git push origin v0.9.5`. This job does
+  # NOT compile anything: it waits for the main-branch build of the SAME commit
+  # to go green, downloads that run's `wayne-openwrt` artifact, and publishes a
   # Release with the boot images attached and the matching CHANGELOG section as
-  # the release notes. Uses the workflow's built-in GITHUB_TOKEN (no extra
-  # secret, no PAT). Branch pushes still build but never publish.
+  # release notes. Uses the built-in GITHUB_TOKEN (no PAT, no extra secret).
+  #
+  # Why: previously a tag triggered a second full ~15 min kernel build of a
+  # commit that main had already built -- same SHA, two compiles, wasted runner
+  # minutes. Now one commit = at most one build.
   release:
-    needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: wayne-openwrt
-          path: dist
+      - name: Wait for the main-branch build of this commit (reuse, don't rebuild)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          SHA="$GITHUB_SHA"
+          echo "Waiting for a successful main build of $SHA (this job never rebuilds)."
+          RUN_ID=""
+          for i in $(seq 1 70); do
+            RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --limit 30 \
+              --json databaseId,event,status,conclusion \
+              --jq '[.[] | select(.event=="push" and .conclusion=="success")][0].databaseId' 2>/dev/null || true)
+            if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
+              echo "Reusing build run $RUN_ID"; break
+            fi
+            echo "[$((i*30))s] still waiting for a green build of $SHA…"
+            sleep 30
+          done
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+            echo "::error::No successful build found for $SHA after ~35 min. Build/push main first, then tag."
+            exit 1
+          fi
+          echo "$RUN_ID" > /tmp/runid
+
+      - name: Download that run's artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh run download "$(cat /tmp/runid)" --repo "$GITHUB_REPOSITORY" -n wayne-openwrt -D dist
+          echo "--- artifacts ---"
+          find dist -type f -name '*.img' -printf '%p  %s bytes\n'
 
       - name: Extract release notes from CHANGELOG.md
         run: |
@@ -321,15 +356,15 @@ jobs:
           import os, re, pathlib
           tag = os.environ['GITHUB_REF_NAME']
           text = pathlib.Path('CHANGELOG.md').read_text()
-          m = re.compile(r'^## \[' + re.escape(tag) + r'\].*?$', re.M).search(text)
+          m = re.compile(r'^## \[' + re.escape(tag) + r'\]', re.M).search(text)
           if m:
-              nxt = re.compile(r'^## \[', re.M).search(text, m.end())
+              nxt = re.compile(r'^## ', re.M).search(text, m.end())
               body = text[m.start(): nxt.start() if nxt else len(text)].strip()
           else:
               body = text.strip()
-          body += "\n\n---\nBoot images are attached below (flash-free: `fastboot boot <image>`).\n"
+          body += "\n\n---\nBoot images are attached below (no install needed: `fastboot boot <image>`).\n"
           pathlib.Path('release-notes.md').write_text(body)
-          print(body[:500])
+          print(body[:400])
           PYEOF
 
       - name: Publish GitHub Release
