@@ -337,5 +337,7 @@ jobs:
         with:
           name: ${{ github.ref_name }}
           body_path: release-notes.md
-          files: dist/*.img
+          files: |
+            dist/**/*.img
+            dist/*.img
           fail_on_unmatched_files: true
