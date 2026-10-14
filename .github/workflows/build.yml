@@ -224,13 +224,28 @@ jobs:
 
       - name: Pack installer boot image (rootfs on eMMC userdata)
         run: |
-          # pack-boot-root.py REPLACES the Android root=/dm-verity cmdline with
-          # root=/dev/mmcblk0p64 while keeping every androidboot.* arg.
-          python3 scripts/pack-boot-root.py mkboot donor-boot.img \
+          # The installer mounts /dev/mmcblk0p64 BY NAME inside its own /init, so
+          # it needs NO kernel root= argument.
+          #
+          # v0.9 shipped this with scripts/pack-boot-root.py, which APPENDED
+          # "root=/dev/mmcblk0p64 rootwait rootfstype=ext4" to the cmdline. The
+          # kernel obeyed that root=, tried to mount the not-yet-formatted
+          # userdata as its root, and panicked BEFORE the initramfs /init ran --
+          # so the phone rebooted straight back to Android and ttyACM0 never
+          # came up. Empirically confirmed: two images from the same donor differ
+          # in exactly ONE place (46 bytes, all inside the cmdline); kernel and
+          # ramdisk are byte-identical.
+          #
+          # Use the plain packer: it preserves the donor cmdline VERBATIM.
+          python3 scripts/pack-boot.py mkboot donor-boot.img \
             kernel/out/arch/arm64/boot/Image.gz-dtb \
             build/installer-initramfs.cpio.gz \
-            build/installer-boot.img \
-            /dev/mmcblk0p64 ext4
+            build/installer-boot.img
+          # CI GATE: rebuild + unpack, prove kernel+ramdisk byte-identical and
+          # that the cmdline equals the donor's (no root=/dm= the kernel obeys).
+          python3 scripts/check-pack.py mkboot donor-boot.img \
+            kernel/out/arch/arm64/boot/Image.gz-dtb \
+            build/installer-initramfs.cpio.gz
           ls -lh build/installer-boot.img
 
       - name: Upload artifacts
@@ -248,3 +263,31 @@ jobs:
             config-usb.txt
             build/installer-boot.img
             build/installer-initramfs.cpio.gz
+
+      # ---- v0.9.3 OTG HARD GATE (deliberately runs AFTER the upload) --------
+      # The config-dump step above only PRINTS "FAIL:" -- it never exits, so a
+      # build where kconfig silently dropped CONFIG_EXTCON (e.g. a `choice`
+      # conflict on USB_DWC3 mode) would still go GREEN and upload a non-OTG
+      # kernel. That is a false safety net; this step makes it a RED build.
+      #
+      # Runs LAST on purpose: images are already built and uploaded, so a red X
+      # here still leaves usable Course B (eMMC installer) artifacts. It only
+      # tells you NOT to attempt Course A (OTG host) until the fragment is fixed.
+      - name: OTG hard gate (fail build if EXTCON/DWC3 did not resolve)
+        run: |
+          cd kernel
+          fail=0
+          for sym in CONFIG_EXTCON CONFIG_USB_DWC3_DUAL_ROLE CONFIG_USB_XHCI_HCD CONFIG_USB_STORAGE CONFIG_BLK_DEV_SD CONFIG_EXT4_FS; do
+            if grep -q "^${sym}=y" out/.config; then
+              echo "PASS: ${sym}=y"
+            else
+              echo "FAIL: ${sym} is NOT =y"
+              grep -E "^# ${sym} is not set|^${sym}=" out/.config || true
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::OTG hard gate failed: the OTG fragment did not resolve. Course A (OTG host) will not work; artifacts were still uploaded for Course B."
+            exit 1
+          fi
+          echo "OTG hard gate PASSED: all OTG symbols resolved =y"
