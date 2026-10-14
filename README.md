@@ -110,3 +110,14 @@ Next milestones (tracked in the roadmap):
 - Kernel: [LKGeek_sdm660](https://github.com/DevHamid/LKGeek_sdm660) (Linux 4.19.325, wayne DTS included)
 - Userspace: [ImmortalWrt](https://github.com/immortalwrt/immortalwrt) 21.02.7 armvirt/64
 - Build recipe derived from [Kernel_Action](https://github.com/DevHamid/Kernel_Action)
+
+### 2026-10-14 — installer-boot.img root cause investigation (v0.9.3, CI run #12)
+- Symptom: `fastboot boot installer-boot.img` → stuck at Mi logo, no `ttyACM0`, phone reboots to Android. `openwrt-boot.img` and `donor-control.img` boot to `ttyACM0` fine.
+- Evidence gathered from CI run #12 logs (steps 8/9/15/16/17/18/19/20):
+  - Step 18: installer uses the plain `pack-boot.py` + donor cmdline verbatim (312 chars, **no `root=`**) — the old `root=` theory is dead.
+  - `check-pack.py` PASS: kernel + ramdisk byte-identical after re-pack, cmdline preserved (312 chars), image 21,348,352 bytes.
+  - Ramdisk sizes: `openwrt-boot.img` 6,907,814 B (WORKS) vs `installer-boot.img` 6,908,450 B (FAILS) — a 636 B delta ≈ the init-script size difference. Kernel bytes identical, same rootfs.
+  - Kernel config + OTG hard gate (steps 15/20): all green — no kernel-side gadget problem.
+- Conclusion: **the only functional difference between the working and failing image is `/init` itself.** The installer `/init` is clean on disk (`sh -n` OK, no CRLF, no non-ASCII), so the failure is at *runtime*: it dies early on-device, before it can bring up / use the serial gadget — and when PID 1 dies, the vendor kernel panics and reboots (matches: Mi logo → Android).
+- Note: local repo `origin/main` ref was stale (pointed at v0.7) — the "8 commits ahead" was just an un-fetched remote, not divergence.
+- Next: v0.9.4 **debug installer** — timestamped log to serial from the very first line, a 3 s "plug in now" pause before anything else, and a respawning shell on `ttyGS0` on ANY failure path so nothing can ever die silently again.
