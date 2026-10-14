@@ -327,8 +327,9 @@ jobs:
           RUN_ID=""
           for i in $(seq 1 70); do
             RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" --limit 30 \
-              --json databaseId,event,status,conclusion \
-              --jq '[.[] | select(.event=="push" and .conclusion=="success")][0].databaseId' 2>/dev/null || true)
+              --json databaseId,event,status,conclusion,workflowName \
+              --jq '[.[] | select(.event=="push" and .conclusion=="success"
+                                  and .databaseId != (env.GITHUB_RUN_ID|tonumber))][0].databaseId' 2>/dev/null || true)
             if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
               echo "Reusing build run $RUN_ID"; break
             fi
@@ -347,8 +348,14 @@ jobs:
         run: |
           set -euo pipefail
           gh run download "$(cat /tmp/runid)" --repo "$GITHUB_REPOSITORY" -n wayne-openwrt -D dist
-          echo "--- artifacts ---"
-          find dist -type f -name '*.img' -printf '%p  %s bytes\n'
+          echo "--- downloaded ---"
+          find dist -type f -printf '%p  %s bytes\n'
+          # The artifact keeps its internal build/ dir, so flatten the images
+          # into out/ — a single flat glob is what the release step uploads.
+          mkdir -p out
+          find dist -type f -name '*.img' -exec cp -v {} out/ \;
+          echo "--- release assets ---"
+          ls -l out/
 
       - name: Extract release notes from CHANGELOG.md
         run: |
@@ -372,7 +379,5 @@ jobs:
         with:
           name: ${{ github.ref_name }}
           body_path: release-notes.md
-          files: |
-            dist/**/*.img
-            dist/*.img
+          files: out/*.img
           fail_on_unmatched_files: true
