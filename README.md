@@ -111,33 +111,10 @@ Next milestones (tracked in the roadmap):
 - Userspace: [ImmortalWrt](https://github.com/immortalwrt/immortalwrt) 21.02.7 armvirt/64
 - Build recipe derived from [Kernel_Action](https://github.com/DevHamid/Kernel_Action)
 
-### 2026-10-14 — installer-boot.img root cause investigation (v0.9.3, CI run #12)
-- Symptom: `fastboot boot installer-boot.img` → stuck at Mi logo, no `ttyACM0`, phone reboots to Android. `openwrt-boot.img` and `donor-control.img` boot to `ttyACM0` fine.
-- Evidence gathered from CI run #12 logs (steps 8/9/15/16/17/18/19/20):
-  - Step 18: installer uses the plain `pack-boot.py` + donor cmdline verbatim (312 chars, **no `root=`**) — the old `root=` theory is dead.
-  - `check-pack.py` PASS: kernel + ramdisk byte-identical after re-pack, cmdline preserved (312 chars), image 21,348,352 bytes.
-  - Ramdisk sizes: `openwrt-boot.img` 6,907,814 B (WORKS) vs `installer-boot.img` 6,908,450 B (FAILS) — a 636 B delta ≈ the init-script size difference. Kernel bytes identical, same rootfs.
-  - Kernel config + OTG hard gate (steps 15/20): all green — no kernel-side gadget problem.
-- Conclusion: **the only functional difference between the working and failing image is `/init` itself.** The installer `/init` is clean on disk (`sh -n` OK, no CRLF, no non-ASCII), so the failure is at *runtime*: it dies early on-device, before it can bring up / use the serial gadget — and when PID 1 dies, the vendor kernel panics and reboots (matches: Mi logo → Android).
-- Note: local repo `origin/main` ref was stale (pointed at v0.7) — the "8 commits ahead" was just an un-fetched remote, not divergence.
-- Next: v0.9.4 **debug installer** — timestamped log to serial from the very first line, a 3 s "plug in now" pause before anything else, and a respawning shell on `ttyGS0` on ANY failure path so nothing can ever die silently again.
+## Changelog & Releases
 
-### 2026-10-14 — v0.9.4 debug installer (robust /init)
-Root cause confirmed: the installer `/init` died at **runtime**, silently. Prime suspect: v0.9's `exec >/dev/console` (line 39) — if that redirect fails, a non-interactive POSIX shell **exits**, PID 1 dies, the vendor kernel panics, and the phone reboots to Android with zero output. The working `openwrt` `/init` never performs that redirect.
-
-v0.9.4 changes (install logic + all 5 guards **unchanged**):
-- **No `exec >/dev/console`** anywhere. All output is *mirrored* to `/dev/console`, `/dev/ttyGS0`, and `/tmp/installer.log`.
-- **Timestamped** `say()` at every step, so the last line printed is the exact failure point.
-- **`EXIT`/`INT`/`TERM` trap** → no path can kill PID 1; any failure respawns a rescue shell on USB serial instead of panicking.
-- **Rescue shell from the first seconds**, on `ttyGS0`, respawning forever.
-- **configfs `f_acm` fallback** if legacy `g_serial` never binds a `ttyGS0`.
-- **3 s "plug in now" pause** before any work.
-- CI now prints the installer `/init` sha256 and asserts the `exec >/dev/console` line is gone.
-
-Push (from Termux, in `~/wayne-openwrt/repo`):
-```
-git -C ~/wayne-openwrt/repo pull --rebase origin main
-# apply the updated files from the bundle, then:
-git add -A && git commit -m "v0.9.4: debug installer (trap+log+rescue shell, drop exec>/dev/console)"
-git push origin main
-```
+Version history lives in [CHANGELOG.md](CHANGELOG.md) and on the
+[Releases page](https://github.com/DevHamid/wayne-openwrt/releases) — every
+`v*` tag automatically builds and publishes a GitHub Release with the boot
+images attached, so the README stays clean and each release is a tidy
+snapshot of images + notes.

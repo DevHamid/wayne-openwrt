@@ -3,6 +3,7 @@ name: Build OpenWrt Wayne
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 jobs:
@@ -293,3 +294,48 @@ jobs:
             exit 1
           fi
           echo "OTG hard gate PASSED: all OTG symbols resolved =y"
+
+  # ---- Tag-triggered Release ------------------------------------------------
+  # Push a tag like v0.9.4 and CI builds everything, then publishes a GitHub
+  # Release with the boot images attached and the matching CHANGELOG section as
+  # the release notes. Uses the workflow's built-in GITHUB_TOKEN (no extra
+  # secret, no PAT). Branch pushes still build but never publish.
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: wayne-openwrt
+          path: dist
+
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          python3 - <<'PYEOF'
+          import os, re, pathlib
+          tag = os.environ['GITHUB_REF_NAME']
+          text = pathlib.Path('CHANGELOG.md').read_text()
+          m = re.compile(r'^## \[' + re.escape(tag) + r'\].*?$', re.M).search(text)
+          if m:
+              nxt = re.compile(r'^## \[', re.M).search(text, m.end())
+              body = text[m.start(): nxt.start() if nxt else len(text)].strip()
+          else:
+              body = text.strip()
+          body += "\n\n---\nBoot images are attached below (flash-free: `fastboot boot <image>`).\n"
+          pathlib.Path('release-notes.md').write_text(body)
+          print(body[:500])
+          PYEOF
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: release-notes.md
+          files: dist/*.img
+          fail_on_unmatched_files: true
