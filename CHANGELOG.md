@@ -6,6 +6,30 @@ where each release also carries the built boot images as downloadable assets.
 
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [v0.9.6] — 2026-10-15 — M5 persistence: usb0 as real UCI interface (DHCP + dropbear)
+
+M5 hardware verified 2026-10-15: single configfs gadget brings up `acm.usb0`
+(`/dev/ttyGS0` serial console) + `rndis.usb0` (USB ethernet). On the PC:
+`/dev/ttyACM0` + `rndis_host` NIC. Device: `ttyGS0` + `usb0` @ 192.168.42.1.
+
+**Post-M5 bug:** dropbear never listened on the gadget at boot.
+
+Root cause: `usb-gadget.init` fallback did `ip addr add 192.168.42.1/24 dev usb0`
+— a raw address invisible to netifd. dnsmasq (no UCI dhcp.usb0) served no DHCP,
+and dropbear refused with `interface usb0 usb0 has no physdev or physdev has no
+suitable ip`. The PC then had no IPv4 on the RNDIS NIC at all (link-local only),
+so `ssh root@192.168.42.1` = connection refused. dropbear only listened after a
+manual `uci delete dropbear.@dropbear[0].Interface` + restart.
+
+- **`overlay-openwrt/usb-gadget.init`**: fallback now creates a real UCI interface
+  — `network.usb0` (static 192.168.42.1/24) + `dhcp.usb0` (dnsmasq, lease .100+)
+  — and adds `usb0` to dropbear's Interface list only when that list exists. Result:
+  plug phone into PC -> DHCP lease -> `ssh root@192.168.42.1`, no manual steps.
+  The br-lan path (DHCP @ 192.168.1.1) is unchanged and preferred when it works.
+
+Flashing: `wayne-installer-boot-v0.9.6.img` via `fastboot flash boot` only — the
+existing rootfs/config on p64 is kept; no userdata reformat.
+
 ## [v0.9.5] — 2026-10-15 — M5: USB gadget ethernet + serial console from ONE gadget
 
 **Path R (runtime UDC steal) is DEAD.** Unbinding the `dwc3` platform device to

@@ -6,10 +6,53 @@
 #
 # Result: acm.usb0 -> /dev/ttyGS0 (serial console), rndis.usb0 -> usb0 (ethernet).
 # Needed because CONFIG_USB_G_SERIAL is gone (M5): nothing auto-binds the UDC.
+#
+# M5 LESSON (2026-10-15): a raw `ip addr add 192.168.42.1/24 dev usb0` is NOT
+# enough. netifd/dnsmasq/dropbear only know about UCI interfaces, so dropbear's
+# init refuses to start with:
+#   "interface lan usb0 has no physdev or physdev has no suitable ip"
+# and dnsmasq serves no DHCP on usb0 (the PC then has no IPv4 at all and ssh
+# gets ECONNREFUSED). The fallback below therefore creates usb0 as a REAL UCI
+# interface (network.usb0 + dhcp.usb0) so plugging the phone into a PC yields
+# DHCP 192.168.42.100+ and `ssh root@192.168.42.1` with no manual steps.
 
 START=95
 STOP=10
 USE_PROCD=1
+
+# Make usb0 a first-class UCI interface: static IP + DHCP server + dropbear bind.
+ensure_usb0_uci() {
+    if ! uci -q get network.usb0 >/dev/null; then
+        uci set network.usb0=interface
+        uci set network.usb0.proto='static'
+        uci set network.usb0.device='usb0'
+        uci set network.usb0.ipaddr='192.168.42.1'
+        uci set network.usb0.netmask='255.255.255.0'
+        uci commit network
+        logger -t usb-gadget "created network.usb0 (static 192.168.42.1/24)"
+    fi
+    if ! uci -q get dhcp.usb0 >/dev/null; then
+        uci set dhcp.usb0=dhcp
+        uci set dhcp.usb0.interface='usb0'
+        uci set dhcp.usb0.start='100'
+        uci set dhcp.usb0.limit='50'
+        uci set dhcp.usb0.leasetime='12h'
+        uci commit dhcp
+        logger -t usb-gadget "created dhcp.usb0 (DHCP 192.168.42.100+)"
+    fi
+    # dropbear: only add usb0 to an explicit Interface list; if the list is
+    # empty dropbear already binds 0.0.0.0 and needs no change.
+    if uci -q get dropbear.@dropbear[0].Interface >/dev/null; then
+        if ! uci -q get dropbear.@dropbear[0].Interface | grep -qw usb0; then
+            uci add_list dropbear.@dropbear[0].Interface='usb0'
+            uci commit dropbear
+            logger -t usb-gadget "dropbear: added usb0 to Interface list"
+        fi
+    fi
+    /etc/init.d/network reload 2>/dev/null
+    /etc/init.d/dnsmasq restart 2>/dev/null
+    /etc/init.d/dropbear restart 2>/dev/null
+}
 
 start_service() {
     [ -r /usr/lib/wayne/usb-gadget.sh ] && . /usr/lib/wayne/usb-gadget.sh
@@ -24,10 +67,8 @@ start_service() {
         logger -t usb-gadget "usb0 bridged into br-lan"
         return 0
     fi
-    # Fallback: standalone static address, and make dropbear listen on it.
-    ip addr add 192.168.42.1/24 dev usb0 2>/dev/null
-    uci -q add_list dropbear.@dropbear[0].Interface='usb0' && uci -q commit dropbear
-    /etc/init.d/dropbear reload 2>/dev/null
-    logger -t usb-gadget "usb0 standalone 192.168.42.1/24"
+    # Fallback: usb0 as its own UCI interface (netifd + dnsmasq + dropbear).
+    ensure_usb0_uci
+    logger -t usb-gadget "usb0 standalone 192.168.42.1/24 (UCI)"
     return 0
 }
