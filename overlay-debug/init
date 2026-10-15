@@ -8,12 +8,12 @@
 # itself boots on wayne hardware. If this works and the full OpenWrt image does
 # not, the fault is in OpenWrt's userspace -- not kernel, not DTB, not bootloader.
 #
-# Serial console: the kernel builds BOTH paths, both added by our fragment:
-#  - CONFIG_USB_G_SERIAL=y  (legacy g_serial; binds automatically at boot)
-#  - CONFIG_USB_CONFIGFS_ACM=y (configfs f_acm; the source always had it,
-#    the vendor defconfig just never enabled it -- our fragment fixes that)
-# g_serial is the zero-config path: it binds the USB-C port automatically and
-# creates /dev/ttyGS0. On a PC it appears as a CDC-ACM port (/dev/ttyACM0/COMx).
+# Serial console + USB ethernet: ONE configfs composite gadget (acm + rndis),
+# built by overlay-common/usb-gadget.sh, sourced below.
+#  - acm.usb0   -> /dev/ttyGS0 (CDC-ACM on the PC: /dev/ttyACM0 or COMx)
+#  - rndis.usb0 -> usb0        (USB ethernet)
+# CONFIG_USB_G_SERIAL is NOT set (M5 finding): legacy g_serial grabbed the
+# single UDC at boot and blocked configfs gadgets with "Resource busy".
 
 mount -t devtmpfs devtmpfs /dev      2>/dev/null
 mount -t proc     proc     /proc
@@ -31,17 +31,17 @@ echo "==================================================="
 echo " wayne-openwrt DEBUG initramfs -- kernel booted OK"
 echo "==================================================="
 
-# --- Wait for the USB serial gadget to come up (g_serial is built-in) -------
-echo "--- waiting for /dev/ttyGS0 (USB serial gadget)... ---"
-n=0
-while [ ! -e /dev/ttyGS0 ] && [ $n -lt 20 ]; do
-    sleep 1
-    n=$((n+1))
-done
-if [ -e /dev/ttyGS0 ]; then
-    echo "USB serial ready. Plug into a PC and open /dev/ttyACM0 (or COMx)."
+# --- Bring up the composite USB gadget (console + ethernet) -----------------
+echo "--- bringing up USB gadget (acm + rndis)... ---"
+if [ -r /usb-gadget.sh ]; then
+    . /usb-gadget.sh
+    if usb_gadget_up; then
+        echo "USB gadget up. /dev/ttyGS0 on the PC = /dev/ttyACM0 (or COMx); usb0 = ethernet."
+    else
+        echo "WARNING: usb_gadget_up failed -- continuing without USB."
+    fi
 else
-    echo "WARNING: no /dev/ttyGS0 after 20s -- continuing without USB serial."
+    echo "WARNING: /usb-gadget.sh missing -- continuing without USB."
 fi
 
 # --- Dump what the kernel found. This is the evidence we debug with. --------

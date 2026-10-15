@@ -6,6 +6,39 @@ where each release also carries the built boot images as downloadable assets.
 
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased] — M5: USB gadget ethernet + serial console from ONE gadget
+
+**Path R (runtime UDC steal) is DEAD.** Unbinding the `dwc3` platform device to
+free the UDC for a configfs gadget **panics this vendor kernel** — twice, two
+independent scripts, both times the phone dropped and rebooted. Console dies at
+`echo a800000.dwc3 > /sys/bus/platform/drivers/dwc3/unbind`, log truncates at
+`unbind rc=0`, no further output ever reaches disk. Not recoverable at runtime.
+
+**Root cause of the whole M5 blocker:** `CONFIG_USB_G_SERIAL=y` made the legacy
+`g_serial` gadget bind the single UDC (`a800000.dwc3`) automatically at boot.
+Nothing else can then claim the UDC — every configfs gadget fails with
+`ash: write error: Resource busy`.
+
+Changes:
+
+- **`kernel-config-fragment.txt`**: `CONFIG_USB_G_SERIAL` is now **not set**.
+  `USB_CONFIGFS_ACM`/`_RNDIS`/`_NCM`/`LIBCOMPOSITE` stay on.
+- **New `overlay-common/usb-gadget.sh`**: `usb_gadget_up()` builds ONE configfs
+  composite gadget `g1` — `acm.usb0` → `/dev/ttyGS0` (console) + `rndis.usb0` →
+  `usb0` (ethernet). Idempotent (safe to call twice).
+- **`overlay-openwrt/init`, `overlay-debug/init`, `overlay-installer/init`**:
+  replace the old "wait for g_serial" logic with a call to `usb_gadget_up`.
+- **New `overlay-openwrt/usb-gadget.init`** (`/etc/init.d/usb-gadget`, `START=95`):
+  the persistent p64 rootfs boots procd, not our `/init`, so this service builds
+  the gadget there and bridges `usb0` into `br-lan` (fallback: static
+  `192.168.42.1/24` + dropbear Interface `usb0`).
+- **`overlay-installer/init`**: installs the service + script into the target
+  **outside** the install-once guard, so an already-installed p64 also gets it.
+- **`build.yml`**: ships `usb-gadget.sh` into all three images and the init.d
+  service into the OpenWrt/installer images.
+
+NOT yet built or flashed. Requires CI unfreeze (one kernel rebuild).
+
 ## [v0.9.4] — 2026-10-14 — debug installer (robust /init)
 
 Root cause confirmed: the installer `/init` died at **runtime**, silently. Prime

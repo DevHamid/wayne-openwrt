@@ -83,6 +83,9 @@ jobs:
           done
           cp overlay-debug/init build/debug/init
           chmod +x build/debug/init
+          # Composite USB gadget builder (acm + rndis); g_serial is gone (M5).
+          cp overlay-common/usb-gadget.sh build/debug/usb-gadget.sh
+          chmod +x build/debug/usb-gadget.sh
           (cd build/debug && find . -print0 | cpio --null -o --format=newc 2>/dev/null | gzip -9 > ../debug-initramfs.cpio.gz)
           ls -lh build/debug-initramfs.cpio.gz
 
@@ -93,12 +96,20 @@ jobs:
           tar xzf ../../rootfs/openwrt-rootfs.tar.gz
           # Ensure /bin/sh exists for our /init shebang (busybox provides it)
           ln -sf busybox bin/sh
-          # Serial login on the g_serial gadget console
+          # Serial login on the configfs acm.usb0 console (g_serial removed, M5)
           # (format: id:runlevels:action:process -- matches existing ttyS0 line)
           echo 'ttyGS0::askfirst:/usr/libexec/login.sh' >> etc/inittab
           # Inject our /init wrapper (kernel -> procd handoff)
           cp ../../overlay-openwrt/init init
           chmod +x init
+          # Composite USB gadget builder (acm + rndis); g_serial is gone (M5).
+          cp ../../overlay-common/usb-gadget.sh usb-gadget.sh
+          chmod +x usb-gadget.sh
+          # Same gadget as a procd service (runs after /init already did it;
+          # usb_gadget_up is idempotent). Installer inherits this via cp -a.
+          cp ../../overlay-openwrt/usb-gadget.init etc/init.d/usb-gadget
+          chmod +x etc/init.d/usb-gadget
+          ln -sf ../init.d/usb-gadget etc/rc.d/S95usb-gadget
           # Safety net: a known-good static shell next to OpenWrt's busybox
           cp ../../tc/busybox bin/busybox-static
           chmod +x bin/busybox-static
@@ -195,6 +206,34 @@ jobs:
             fi
           done
 
+      # M5 gate: the WHOLE point of this build is that g_serial is gone and the
+      # configfs composite gadget (acm + rndis) can claim the single UDC. If
+      # USB_G_SERIAL still resolves =y, the flash is wasted -- fail here instead.
+      - name: M5 gate (g_serial gone, configfs acm+rndis present)
+        run: |
+          cd kernel
+          fail=0
+          if grep -q '^CONFIG_USB_G_SERIAL=y' out/.config; then
+            echo "FAIL: CONFIG_USB_G_SERIAL=y -- legacy g_serial will grab the UDC again"
+            fail=1
+          else
+            echo "PASS: USB_G_SERIAL not =y (g_serial removed)"
+          fi
+          for sym in CONFIG_USB_CONFIGFS CONFIG_USB_CONFIGFS_ACM CONFIG_USB_CONFIGFS_RNDIS CONFIG_USB_LIBCOMPOSITE CONFIG_USB_GADGET; do
+            if grep -q "^${sym}=y" out/.config; then
+              echo "PASS: ${sym}=y"
+            else
+              echo "FAIL: ${sym} is NOT =y -- composite gadget cannot be built"
+              grep -E "^# ${sym} is not set|^${sym}=" out/.config || true
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::M5 gate failed: composite USB gadget would not work on device. Not flashing this."
+            exit 1
+          fi
+          echo "M5 gate PASSED: g_serial gone, configfs acm+rndis ready"
+
       - name: Pack boot images (kernel + our initramfs)
         run: |
           # Reuse the SAME pinned donor image as the control step
@@ -223,6 +262,10 @@ jobs:
           cp -a build/openwrt build/installer
           cp overlay-installer/init build/installer/init
           chmod +x build/installer/init
+          # init.d service copied into the persistent rootfs by the installer
+          # (usb-gadget.sh is already here, inherited from build/openwrt).
+          cp overlay-openwrt/usb-gadget.init build/installer/usb-gadget.init
+          chmod +x build/installer/usb-gadget.init
           echo "[v0.9.4] installer /init sha256: $(sha256sum overlay-installer/init | cut -d' ' -f1)"
           grep -c 'exec >/dev/console' overlay-installer/init || echo 'no exec >/dev/console (good)'
           (cd build/installer && find . -print0 | cpio --null -o --format=newc 2>/dev/null | gzip -9 > ../installer-initramfs.cpio.gz)

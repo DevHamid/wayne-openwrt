@@ -69,14 +69,11 @@ CONFIG_USB_CONFIGFS_RNDIS=y
 CONFIG_USB_GADGET=y
 
 # USB serial console (CDC ACM) -- the debug console we need.
-# Neither option is in the vendor defconfig; verified against gadget Kconfig:
-#  - USB_G_SERIAL selects USB_U_SERIAL + USB_F_ACM + USB_F_SERIAL + USB_LIBCOMPOSITE
-#    and produces /dev/ttyGS0 automatically (legacy gadget).
-#  - USB_CONFIGFS_ACM also selects USB_U_SERIAL + USB_F_ACM, so the SAME
-#    /dev/ttyGS0 appears when bound through configfs (the /init scripts bind it).
-# We enable both: legacy g_serial is the zero-config fallback, configfs-ACM is
-# the clean path and matches the configfs-NCM/RNDIS functions already enabled.
-CONFIG_USB_G_SERIAL=y
+# USB_G_SERIAL removed (M5 finding): single UDC cannot hold both the legacy
+# g_serial and a configfs composite gadget -- g_serial binds at boot and the
+# configfs gadget then gets 'Resource busy'. Console + ethernet come from ONE
+# configfs composite gadget (acm.usb0 + rndis.usb0) built by the /init scripts.
+# CONFIG_USB_G_SERIAL is not set
 CONFIG_USB_CONFIGFS_ACM=y
 CONFIG_USB_LIBCOMPOSITE=y
 

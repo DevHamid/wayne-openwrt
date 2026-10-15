@@ -77,28 +77,20 @@ say "no exec >/dev/console: output is mirrored, never redirected"
 say "plug the phone into the PC NOW; 3s pause before any work"
 sleep 3
 
-# --- 3. serial console -----------------------------------------------------
-n=0; while [ ! -e /dev/ttyGS0 ] && [ $n -lt 15 ]; do sleep 1; n=$((n+1)); done
-if [ ! -e /dev/ttyGS0 ]; then
-    say "no /dev/ttyGS0 after 15s -- trying configfs f_acm fallback"
-    G=/sys/kernel/config/usb_gadget/g1
-    mkdir -p "$G" 2>/dev/null
-    echo 0x1d6b > "$G/idVendor"  2>/dev/null
-    echo 0x0104 > "$G/idProduct" 2>/dev/null
-    mkdir -p "$G/strings/0x409" 2>/dev/null
-    echo wayne     > "$G/strings/0x409/serialnumber" 2>/dev/null
-    echo wayne     > "$G/strings/0x409/manufacturer" 2>/dev/null
-    echo installer > "$G/strings/0x409/product"      2>/dev/null
-    mkdir -p "$G/configs/c.1/strings/0x409" 2>/dev/null
-    echo acm > "$G/configs/c.1/strings/0x409/configuration" 2>/dev/null
-    mkdir -p "$G/functions/acm.usb0" 2>/dev/null
-    ln -s "$G/functions/acm.usb0" "$G/configs/c.1/" 2>/dev/null
-    UDC=$(ls /sys/class/udc/ 2>/dev/null | head -1)
-    [ -n "$UDC" ] && echo "$UDC" > "$G/UDC" 2>/dev/null
-    n=0; while [ ! -e /dev/ttyGS0 ] && [ $n -lt 10 ]; do sleep 1; n=$((n+1)); done
+# --- 3. USB gadget (console + ethernet) ------------------------------------
+# g_serial is gone (M5 finding), so nothing auto-binds the UDC. Build the
+# composite acm+rndis gadget here: ttyGS0 for this console, usb0 for ethernet.
+if [ -r /usb-gadget.sh ]; then
+    . /usb-gadget.sh
+    if usb_gadget_up; then
+        say "USB gadget up: ttyGS0 (console) + usb0 (ethernet)"
+    else
+        say "WARNING: usb_gadget_up failed"
+    fi
+else
+    say "WARNING: /usb-gadget.sh missing"
 fi
 if [ -e /dev/ttyGS0 ]; then
-    say "USB serial ready (/dev/ttyGS0 -> PC /dev/ttyACM0)"
     # No cttyhack/setsid in OpenWrt's busybox: plain background-respawn shell.
     ( while true; do /bin/sh < /dev/ttyGS0 > /dev/ttyGS0 2>&1; sleep 1; done ) &
 else
@@ -150,6 +142,7 @@ if [ "$ALREADY" != "1" ]; then
 ./mnt
 ./init
 ./rom
+./usb-gadget.sh
 EXCL
     tar -cf - -C / -X /tmp/exclude.list . | tar -xf - -C "$MNT" || fatal "rootfs copy failed"
     say "copy done; verifying"
@@ -162,7 +155,19 @@ EXCL
     say "install complete -- marker written"
 fi
 
-# --- 8. hand off -----------------------------------------------------------
+# --- 8. USB gadget service (every boot, idempotent) ------------------------
+# Outside the install-once guard on purpose: an already-installed p64 (marker
+# found, copy skipped) still needs the service. Cheap, overwrites each boot.
+say "installing persistent USB gadget service"
+mkdir -p "$MNT/usr/lib/wayne" "$MNT/etc/init.d"
+[ -r /usb-gadget.sh ] && cp /usb-gadget.sh "$MNT/usr/lib/wayne/usb-gadget.sh"
+[ -r /usb-gadget.init ] && {
+    cp /usb-gadget.init "$MNT/etc/init.d/usb-gadget"
+    chmod +x "$MNT/etc/init.d/usb-gadget"
+    ln -sf ../init.d/usb-gadget "$MNT/etc/rc.d/S95usb-gadget"
+}
+
+# --- 9. hand off -----------------------------------------------------------
 say "preparing switch_root"
 mkdir -p "$MNT/dev" "$MNT/proc" "$MNT/sys" "$MNT/tmp"
 mount --move /dev  "$MNT/dev"  2>/dev/null

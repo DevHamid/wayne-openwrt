@@ -14,12 +14,12 @@
 #   does the minimum setup the kernel cannot do itself, then hands control
 #   to OpenWrt. Everything else is OpenWrt's job.
 #
-# Serial console: the kernel builds BOTH paths, both added by our fragment:
-#  - CONFIG_USB_G_SERIAL=y  (legacy g_serial; binds automatically at boot)
-#  - CONFIG_USB_CONFIGFS_ACM=y (configfs f_acm; in the kernel source all along,
-#    just never enabled by the vendor defconfig -- our fragment enables it)
-# g_serial is the zero-config path: it creates /dev/ttyGS0 automatically -- a
-# PC sees a CDC-ACM port.
+# Serial console + USB ethernet: ONE configfs composite gadget (acm + rndis),
+# built by overlay-common/usb-gadget.sh, which we source below.
+#  - acm.usb0   -> /dev/ttyGS0  (serial console -> PC /dev/ttyACM0)
+#  - rndis.usb0 -> usb0         (USB ethernet  -> SSH)
+# CONFIG_USB_G_SERIAL is NOT set (M5 finding): the legacy g_serial grabbed the
+# single UDC at boot and blocked any configfs gadget with "Resource busy".
 
 # --- 1. Mount the basics ------------------------------------------------
 mount -t devtmpfs devtmpfs /dev      2>/dev/null
@@ -32,18 +32,18 @@ mount -t devpts   devpts   /dev/pts  2>/dev/null
 
 echo "initramfs: /init reached PID 1"
 
-# --- 2. Wait briefly for the USB serial gadget ----------------------------
-# g_serial is built into the kernel and binds as soon as the USB controller
-# (dwc3) probes. Give it a moment, then tell the world where to look.
-n=0
-while [ ! -e /dev/ttyGS0 ] && [ $n -lt 10 ]; do
-    sleep 1
-    n=$((n+1))
-done
-if [ -e /dev/ttyGS0 ]; then
-    echo "initramfs: USB serial ready (/dev/ttyGS0 -> PC /dev/ttyACM0)" > /dev/ttyGS0
+# --- 2. Bring up the composite USB gadget (console + ethernet) -----------
+# Nothing binds the UDC for us any more: g_serial is gone, so WE build the
+# gadget here. acm.usb0 gives /dev/ttyGS0 (console); rndis.usb0 gives usb0.
+if [ -r /usb-gadget.sh ]; then
+    . /usb-gadget.sh
+    if usb_gadget_up; then
+        echo "initramfs: USB gadget up (/dev/ttyGS0 + usb0)" > /dev/ttyGS0
+    else
+        echo "initramfs: WARNING -- usb_gadget_up failed (continuing)"
+    fi
 else
-    echo "initramfs: WARNING -- no /dev/ttyGS0 yet (continuing)"
+    echo "initramfs: WARNING -- /usb-gadget.sh missing (no console, no usb0)"
 fi
 
 echo "initramfs: handing over to OpenWrt /sbin/init"
