@@ -6,7 +6,7 @@ where each release also carries the built boot images as downloadable assets.
 
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased] — M5: USB gadget ethernet + serial console from ONE gadget
+## [v0.9.5] — 2026-10-15 — M5: USB gadget ethernet + serial console from ONE gadget
 
 **Path R (runtime UDC steal) is DEAD.** Unbinding the `dwc3` platform device to
 free the UDC for a configfs gadget **panics this vendor kernel** — twice, two
