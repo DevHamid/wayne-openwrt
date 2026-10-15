@@ -40,18 +40,13 @@ ensure_usb0_uci() {
         uci commit dhcp
         logger -t usb-gadget "created dhcp.usb0 (DHCP 192.168.42.100+)"
     fi
-    # dropbear: usb0 must NOT be in an explicit Interface list. A raw
-    # `ip addr add` (old code) plus add_list produced a duplicated
-    # Interface='usb0' 'usb0', and dropbear's init then refused to start:
-    #   "interface usb0 usb0 has no physdev or physdev has no suitable ip"
-    #   -> "active with no instances", nothing on :22.
-    # PROVEN GOOD state (2026-10-15): no usb0 entry -> dropbear binds
-    # 0.0.0.0:22. Reproduce that deterministically instead of guessing.
-    if uci -q get dropbear.@dropbear[0].Interface | grep -qw usb0; then
-        uci -q delete dropbear.@dropbear[0].Interface
-        uci commit dropbear
-        logger -t usb-gadget "dropbear: dropped Interface list (binds 0.0.0.0)"
-    fi
+    # dropbear: duplicate Interface='usb0' 'usb0' kills listener.
+    # PROVEN GOOD (2026-10-15): single usb0 -> LISTEN 192.168.42.1:22.
+    # Normalize every boot: delete then add once.
+    uci -q delete dropbear.@dropbear[0].Interface
+    uci add_list dropbear.@dropbear[0].Interface='usb0'
+    uci commit dropbear
+    logger -t usb-gadget "dropbear: Interface normalized to single usb0"
     /etc/init.d/network reload 2>/dev/null
     /etc/init.d/dnsmasq restart 2>/dev/null
     /etc/init.d/dropbear restart 2>/dev/null
