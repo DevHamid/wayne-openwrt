@@ -32,7 +32,13 @@ YOU ARE HERE
 
 - **M6 — USB OTG host mode (pocket modem).** dwc3 as HOST: tethered phone USB → Wayne WAN → NAT. Single UDC = device XOR host; tear the gadget down cleanly; NEVER unbind dwc3 (panics this kernel). *Done when:* a client gets internet THROUGH Wayne via NAT.
 - **M7 — Docker feasibility probe on 4.19 (open question, not a promise).** Check live kernel features (`/proc/cgroups`, namespaces, `overlay`), try a static dockerd → `docker run hello-world`. YES → M8 includes Docker. NO → v1.0 runs services native (procd + Hermes), Docker revisited on the future mainline track. *Done when:* probe answered with evidence.
-- **M8 — Services on 21.02.** Hermes agent port, firewall/NAT zones (lan/usb0/wan), modem/Wi-Fi bring-up as far as the vendor kernel goes, dockerman only if M7 says yes. *Done when:* Wayne routes + serves with config surviving reboot.
+- **M8 — Full OpenWrt experience on 21.02 (the biggest open surface).** Stock armvirt/64 rootfs ships NONE of this today — all of it gets built/probed here:
+  - **LuCI webui** — package it into the image (opkg at CI time), reachable over usb0/ethernet; phone = router you configure in a browser.
+  - **Wi-Fi — AP (hotspot) vs client mode** — probe vendor `qcacld-3.0`/wlan driver against hostapd/wpa_supplicant on 4.19; vendor driver is cfg80211-based, so AP *may* work natively, but unproven → answer with evidence, not hope.
+  - **Cellular data** — SDM660 modem reachable only via Qualcomm IPC/QRTR stack (Android used qmuxd); bring-up = probe qrtr + data-path on 4.19. Hard, honest odds, same evidence rule.
+  - **Customization** — opkg feeds, themes, extra services, dockerman only if M7 says yes.
+  - Also: Hermes agent port, firewall/NAT zones (lan/usb0/wan).
+  *Done when:* Wayne routes + serves (webui up, wifi + modem probed with YES/NO evidence) with config surviving reboot.
 - **M9★ — Polish + recovery-flashable ROM → v1.0.** Baked-in root password, RTC/NTP at boot, thermal/charging, USB reconnect watchdog. **The actual finish = flashable OpenWrt ROM for TWRP/OrangeFox**: recovery zip (`updater-script`/`update-binary`) writing boot image + rootfs to p64 with the 5 p64-only guards. *Done when:* zip flashed from OrangeFox → phone boots → SSH works → tag `v1.0`.
 
 ### 🔮 Future track (parked, post-v1.0)
