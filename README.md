@@ -183,6 +183,9 @@ Vendor kernel already ships the display stack (`CONFIG_FB_MSM_MDSS=y`,
   re-blanking right after a manual `on`. That is the real cause of "offdelay
   only works after I run status/off/on first". kill_prev now uses SIGKILL with
   a cmdline check (pid-reuse safe), so `on`/`stop` always win.
+  Second bug (v0.9.7): the daemons wrote `$$` (the parent pid, already dead)
+  to the pidfile instead of `$!` (the real backgrounded subshell), so the
+  daemon could never be killed and `status` lied. Fixed in all three modes.
 - later (M8): a console on fb0 (`/dev/tty1` + `con2fbmap`) can show uptime / net /
   IP stats on the panel.
 
