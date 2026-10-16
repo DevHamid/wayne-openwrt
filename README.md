@@ -157,6 +157,8 @@ Version history lives in [CHANGELOG.md](CHANGELOG.md) and on the [Releases page]
 
 ---
 **Repo maintenance rule:** on every push, update this README's roadmap/status first — this file is the project's source of truth for progress.
+
+**Knowledge Notes:** plain-language + technical explainers of the build live in `docs/knowledge-notes/` (mirrored to the Telegram group topic). They exist so the journey is readable over morning coffee, not only as diffs.
 ### Screen / burn-in protection (userspace, no kernel change)
 Vendor kernel already ships the display stack (`CONFIG_FB_MSM_MDSS=y`,
 `CONFIG_BACKLIGHT_QCOM_SPMI_WLED=y`). Userspace control:
