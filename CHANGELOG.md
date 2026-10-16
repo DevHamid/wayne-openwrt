@@ -6,6 +6,58 @@ where each release also carries the built boot images as downloadable assets.
 
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [v0.9.7] — 2026-10-16 — M6 VBUS root-cause DT fix + in-image screen/burn-in automation
+
+Two fixes in one build. Neither needs a p64 reformat: flash the installer-boot
+image (`fastboot flash boot`) and the new boot/rootfs drop in.
+
+### M6 — OTG host 5V (VBUS) root cause + fix
+
+`scripts/vbus-host-test.sh` proved the writable knob
+`/sys/module/policy_engine/parameters/pd_vbus_ctrl` does NOTHING: with
+`pd_vbus_ctrl=1` and `mode=host` held 120s, `extcon3 (qpnp-smb2)` stayed
+`USB=0 USB-HOST=0`, `regulator.75 smb2-vbus` stayed `disabled`, `BOOST_CURRENT=0`,
+and only the two xHCI root hubs appeared (no downstream device). Root cause is
+in the kernel/DT, not userspace.
+
+Source-verified (DevHamid/LKGeek_sdm660@build-all-rekernel): `dwc3_otg_start_host()`
+(`drivers/usb/dwc3/dwc3-msm.c`) raises the OTG 5V boost ONLY through
+`devm_regulator_get_optional(dev, "vbus_dwc3")` + `regulator_enable()`. The stock
+`ssusb@a800000` DT node (`sdm660-common.dtsi`) declares `USB3_GDSC-supply` +
+`dpdm-supply` but **no** `vbus_dwc3-supply`, so `get_optional` returns NULL and the
+enable is silently skipped → `smb2-vbus` never rises → nothing enumerates. Android
+masks this because its userspace USB HAL enables `smb2-vbus` itself; OpenWrt has no
+such HAL.
+
+- **`patches/usb3-vbus-dwc3-supply.sh`**: idempotently adds
+  `vbus_dwc3-supply = <&smb2_vbus>;` to the `ssusb@a800000` node.
+- **`.github/workflows/build.yml`**: new step "Apply M6 VBUS DT fix" runs the patch
+  before compile and greps the tree to confirm it landed.
+
+Next: flash, seat an OTG device, expect `regulator.75 = enabled` and a `1-1:` device.
+
+### Screen / burn-in automation now IN THE IMAGE
+
+`scripts/screen.sh` + `overlay-openwrt/etc/init.d/burnin-guard` were committed but
+**never installed** by the build — so the panel stayed lit on the logo and the
+user had to run `screen.sh` by hand. Fixed:
+
+- **build.yml** installs `/root/screen.sh` + `/etc/init.d/burnin-guard` and the
+  `S99burnin-guard` rc.d link into the image.
+- **overlay-installer/init** re-installs both every boot (outside the
+  install-once marker), so an already-provisioned p64 picks them up too.
+- **`screen.sh` new `guard` mode**: blank after N s, then RE-ASSERT the blank every
+  R s. A one-shot `offdelay` can be silently undone by the panel driver coming up
+  late — re-asserting wins that race. `burnin-guard` now calls `screen.sh guard 90`.
+- **kill-path bug fixed**: the daemons trap HUP/INT/TERM to survive a closed
+  session, so the old `kill` (SIGTERM) was IGNORED and the guard kept re-blanking
+  right after a manual `on`. `kill_prev` now uses SIGKILL with a `/proc` cmdline
+  check (pid-reuse safe). This is the real cause of "offdelay only works after I
+  run status/off/on first".
+
+Manual override is unchanged and instant: `sh /root/screen.sh on`, or
+`/etc/init.d/burnin-guard stop`.
+
 ## [v0.9.6] — 2026-10-15 — M5 persistence: usb0 as real UCI interface (DHCP + dropbear)
 
 M5 hardware verified 2026-10-15: single configfs gadget brings up `acm.usb0`
