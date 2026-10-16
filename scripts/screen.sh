@@ -16,7 +16,9 @@
 #   sh screen.sh set 1200          # set backlight 0..4095
 #   sh screen.sh offdelay 90       # turn off once, after 90s  (detached)
 #   sh screen.sh toggle 90         # alternate off/on every 90s (burn-in guard)
-#   sh screen.sh stop              # kill any running offdelay/toggle
+#   sh screen.sh guard 90 20       # off after 90s, then RE-ASSERT off every 20s
+#                                   #   (boot guard: survives late driver re-enable)
+#   sh screen.sh stop              # kill any running offdelay/guard/toggle
 #
 # Detached-safe: `sh screen.sh offdelay 90 >/dev/null 2>&1 &`
 
@@ -48,7 +50,16 @@ do_on() {
 }
 
 kill_prev() {
-    [ -f "$PIDF" ] && kill "$(cat $PIDF)" 2>/dev/null
+    # The offdelay/toggle/guard daemons trap HUP/INT/TERM (so they survive the
+    # SSH/serial session closing). A plain `kill` = SIGTERM = IGNORED -> the
+    # daemon would keep re-blanking right after `on`. Use SIGKILL (untrappable),
+    # and only if the pid is really our script (guard against pid reuse).
+    [ -f "$PIDF" ] || return 0
+    p=$(cat "$PIDF" 2>/dev/null)
+    if [ -n "$p" ] && [ -r "/proc/$p/cmdline" ] \
+       && grep -qa screen.sh "/proc/$p/cmdline" 2>/dev/null; then
+        kill -9 "$p" 2>/dev/null
+    fi
     rm -f "$PIDF"
 }
 
@@ -67,10 +78,10 @@ off)
     do_off; echo "screen off"
     ;;
 on)
-    do_on; echo "screen on (brightness=$(cat $STATE 2>/dev/null))"
+    kill_prev; do_on; echo "screen on (brightness=$(cat $STATE 2>/dev/null))"
     ;;
 set)
-    [ -n "$2" ] && echo "$2" > "$BL" 2>/dev/null && echo "brightness=$2"
+    kill_prev; [ -n "$2" ] && echo "$2" > "$BL" 2>/dev/null && echo "brightness=$2"
     ;;
 offdelay)
     N=${2:-90}
@@ -100,10 +111,28 @@ toggle)
     ) >/dev/null 2>&1 &
     echo "toggle started (every ${N}s, pid $!)"
     ;;
+guard)
+    # BOOT GUARD: blank after N seconds, then keep re-asserting it every R
+    # seconds. A single offdelay write can be silently undone by the panel
+    # driver coming up late; repeating it wins that race. `screen.sh on`
+    # (or `stop`) kills the loop, so the manual override is always instant.
+    N=${2:-90}; R=${3:-20}
+    kill_prev
+    (
+        trap '' HUP INT TERM
+        echo $$ > "$PIDF"
+        sleep "$N"
+        while :; do
+            do_off
+            sleep "$R"
+        done
+    ) >/dev/null 2>&1 &
+    echo "guard started (off in ${N}s, re-assert every ${R}s, pid $!)"
+    ;;
 stop)
     kill_prev; do_on; echo "daemon stopped, screen on"
     ;;
 *)
-    echo "usage: $0 {status|off|on|set <0-4095>|offdelay [s]|toggle [s]|stop}"
+    echo "usage: $0 {status|off|on|set <0-4095>|offdelay [s]|toggle [s]|guard [s] [r]|stop}"
     ;;
 esac

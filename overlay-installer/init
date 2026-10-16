@@ -167,6 +167,23 @@ mkdir -p "$MNT/usr/lib/wayne" "$MNT/etc/init.d"
     ln -sf ../init.d/usb-gadget "$MNT/etc/rc.d/S95usb-gadget"
 }
 
+# --- 8b. burn-in guard (every boot, idempotent) ----------------------------
+# Same reason as the gadget: an already-installed p64 (marker found) skips the
+# rootfs copy, so install the screen-off automation here too. Fresh installs
+# also get it via the initramfs tree, but this guarantees both the helper and
+# the S99 rc.d link exist on ANY boot.
+say "installing burn-in guard (screen off automation)"
+[ -r /root/screen.sh ] && {
+    mkdir -p "$MNT/root"
+    cp /root/screen.sh "$MNT/root/screen.sh"
+    chmod +x "$MNT/root/screen.sh"
+}
+[ -r /etc/init.d/burnin-guard ] && {
+    cp /etc/init.d/burnin-guard "$MNT/etc/init.d/burnin-guard"
+    chmod +x "$MNT/etc/init.d/burnin-guard"
+    ln -sf ../init.d/burnin-guard "$MNT/etc/rc.d/S99burnin-guard"
+}
+
 # --- 9. hand off -----------------------------------------------------------
 say "preparing switch_root"
 mkdir -p "$MNT/dev" "$MNT/proc" "$MNT/sys" "$MNT/tmp"

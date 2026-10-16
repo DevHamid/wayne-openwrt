@@ -113,6 +113,19 @@ jobs:
           # Safety net: a known-good static shell next to OpenWrt's busybox
           cp ../../tc/busybox bin/busybox-static
           chmod +x bin/busybox-static
+          # Burn-in guard (screen off automation). These files lived in the
+          # repo but were NEVER installed, so the panel stayed lit on the logo
+          # for hours and the user had to run screen.sh by hand. Install them:
+          #   /root/screen.sh            panel blank + backlight control helper
+          #   /etc/init.d/burnin-guard   START=99: screen.sh guard 90 at boot
+          # The installer (cp -a of this tree) inherits both automatically.
+          mkdir -p root
+          cp ../../scripts/screen.sh root/screen.sh
+          chmod +x root/screen.sh
+          cp ../../overlay-openwrt/etc/init.d/burnin-guard etc/init.d/burnin-guard
+          chmod +x etc/init.d/burnin-guard
+          ln -sf ../init.d/burnin-guard etc/rc.d/S99burnin-guard
+          echo "burnin guard installed: $(ls -l etc/rc.d/S99burnin-guard)"
           (find . -print0 | cpio --null -o --format=newc 2>/dev/null | gzip -9 > ../openwrt-initramfs.cpio.gz)
           ls -lh ../openwrt-initramfs.cpio.gz
 
