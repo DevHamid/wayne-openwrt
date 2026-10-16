@@ -18,29 +18,40 @@ import sys
 p = sys.argv[1]
 s = open(p).read()
 
-# 1) OTG workaround timeout (all otg_current steps exhausted)
-old = "\tif (i == ARRAY_SIZE(otg_current)) {\n\t\trc = -EINVAL;\n\t\tgoto out;\n\t}\n"
-new = ("\tif (i == ARRAY_SIZE(otg_current)) {\n\t\trc = -EINVAL;\n"
-       "\t\t/* M6 diag: every OTG current step timed out; the boost never\n"
-       "\t\t * signalled BOOST_SOFTSTART_DONE. smblib_err is compiled out. */\n"
-       "\t\tpr_err(\"%s: M6 diag OTG boost softstart TIMEOUT (tried %zu currents) rc=%d\\n\",\n"
-       "\t\t\t__func__, ARRAY_SIZE(otg_current), rc);\n"
-       "\t\tgoto out;\n\t}\n")
-assert old in s, "otg_wa tail not found"
-s = s.replace(old, new, 1)
+def sub_once(old, new, tag):
+    global s
+    n = s.count(old)
+    assert n == 1, f"{tag}: expected 1 match, found {n}"
+    s = s.replace(old, new, 1)
 
-# 2) OTG_ENG_OTG_CFG_REG register write failure
-old = ("\tif (rc < 0) {\n"
-       "\t\tsmblib_err(chg, \"Couldn't set OTG_ENG_OTG_CFG_REG rc=%d\\n\",\n"
-       "\t\t\trc);\n\t\treturn rc;\n\t}\n")
-new = (old.rstrip("\n") +
-       "\n\t\tpr_err(\"%s: M6 diag OTG_ENG_OTG_CFG_REG write failed rc=%d\\n\",\n"
-       "\t\t\t__func__, rc);\n\t\treturn rc;\n\t}\n")
-assert old in s, "OTG_ENG_OTG_CFG_REG block not found"
-s = s.replace(old, new, 1)
+# 1) OTG workaround timeout (all otg_current steps exhausted)
+sub_once(
+"\tif (i == ARRAY_SIZE(otg_current)) {\n\t\trc = -EINVAL;\n\t\tgoto out;\n\t}\n",
+"\tif (i == ARRAY_SIZE(otg_current)) {\n\t\trc = -EINVAL;\n"
+"\t\t/* M6 diag: every OTG current step timed out; the boost never\n"
+"\t\t * signalled BOOST_SOFTSTART_DONE. smblib_err is compiled out. */\n"
+"\t\tpr_err(\"%s: M6 diag OTG boost softstart TIMEOUT (tried %zu currents) rc=%d\\n\",\n"
+"\t\t\t__func__, ARRAY_SIZE(otg_current), rc);\n"
+"\t\tgoto out;\n\t}\n",
+"otg_wa timeout")
+
+# 2) OTG_ENG_OTG_CFG_REG register write failure -- insert INSIDE the if-block,
+#    right before its `return rc;` (the two-line smblib_err form is unique to
+#    the enable path; the disable path uses a one-line form).
+sub_once(
+"\t\tsmblib_err(chg, \"Couldn't set OTG_ENG_OTG_CFG_REG rc=%d\\n\",\n"
+"\t\t\trc);\n"
+"\t\treturn rc;\n",
+"\t\tsmblib_err(chg, \"Couldn't set OTG_ENG_OTG_CFG_REG rc=%d\\n\",\n"
+"\t\t\trc);\n"
+"\t\tpr_err(\"%s: M6 diag OTG_ENG_OTG_CFG_REG write failed rc=%d\\n\",\n"
+"\t\t\t__func__, rc);\n"
+"\t\treturn rc;\n",
+"OTG_CFG write")
 
 # 3) regulator_enable wrapper: entry, votable-miss, and exit rc
-old = """\tmutex_lock(&chg->otg_oc_lock);
+sub_once(
+"""\tmutex_lock(&chg->otg_oc_lock);
 \tif (chg->otg_en)
 \t\tgoto unlock;
 
@@ -64,8 +75,8 @@ unlock:
 \tmutex_unlock(&chg->otg_oc_lock);
 \treturn rc;
 }
-"""
-new = """\tmutex_lock(&chg->otg_oc_lock);
+""",
+"""\tmutex_lock(&chg->otg_oc_lock);
 \t/* M6 diag: smblib_err is compiled out, so log unconditionally. */
 \tpr_err("%s: M6 diag ENTER otg_en=%d icl_votable=%p wa_flags=0x%x\\n",
 \t\t__func__, chg->otg_en, chg->usb_icl_votable, chg->wa_flags);
@@ -97,9 +108,8 @@ unlock:
 \tmutex_unlock(&chg->otg_oc_lock);
 \treturn rc;
 }
-"""
-assert old in s, "smblib_vbus_regulator_enable not found"
-s = s.replace(old, new, 1)
+""",
+"regulator_enable wrapper")
 
 open(p, "w").write(s)
 print("smb-lib.c patched: unconditional vbus-enable diagnostics")
