@@ -135,6 +135,19 @@ jobs:
           echo "--- last 12 lines of defconfig now: ---"
           tail -n 12 arch/arm64/configs/vendor/wayne-oss-perf_defconfig
 
+      # M6 VBUS root-cause fix. dwc3_otg_start_host() raises the OTG 5V boost
+      # ONLY through devm_regulator_get_optional(dev, "vbus_dwc3"); the stock
+      # ssusb@a800000 DT node never declares that supply, so smb2-vbus stays
+      # disabled in host mode and no downstream device enumerates. Android
+      # hides this because its userspace USB HAL enables smb2-vbus itself;
+      # OpenWrt has no such HAL. Wire the regulator into the node.
+      - name: Apply M6 VBUS DT fix (vbus_dwc3-supply)
+        run: |
+          cd kernel
+          sh ../patches/usb3-vbus-dwc3-supply.sh
+          echo "--- verify in tree ---"
+          grep -n "vbus_dwc3-supply" arch/arm64/boot/dts/vendor/qcom/sdm660-common.dtsi
+
       - name: Download mkbootimg tools
         run: |
           git clone --depth=1 https://android.googlesource.com/platform/system/tools/mkbootimg mkboot -b master-kernel-build-2022
