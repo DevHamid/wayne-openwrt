@@ -6,6 +6,34 @@ where each release also carries the built boot images as downloadable assets.
 
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [v0.9.8] — 2026-10-16 — M6 on-device follow-up (host regression) + screen guard under procd
+
+### M6: v0.9.7 regression — host mode lost entirely
+
+v0.9.7's DT fix (`vbus_dwc3-supply`) is correct wiring, but on-device the charger's
+`smblib_vbus_regulator_enable()` FAILED and `dwc3_otg_start_host()` bailed before
+`dwc3_host_init()` — `usb_devs` empty for the whole run (worse than v0.9.6, which at
+least brought the xHCI root hubs up). Log: `unable to enable vbus_reg` then
+`unable to start host`.
+
+- **`patches/dwc3-vbus-nonfatal.sh`**: log the rc and CONTINUE — host mode always
+  comes up; also make the disable path non-fatal (a failed disable skipped all host
+  teardown and wedged the next start).
+- **`patches/charger-vbus-diag.sh`**: `smb-lib.c` gates every `smblib_err()` behind
+  `#ifdef DEBUG`, which the Makefile never defines, so the charger printed NOTHING.
+  Adds unconditional `pr_err()` at ENTER / votable-NULL / OTG_CFG-write / boost
+  softstart TIMEOUT / EXIT `rc=N`, so the next flash names the failure.
+
+### Screen: guard supervised by procd + `on` veto
+
+- **`overlay-openwrt/etc/init.d/burnin-guard`**: `USE_PROCD=1` + `screen.sh guardfg 90`
+  (respawn 3600 5 5). v0.9.7 backgrounded the daemon from `start()`, and procd reaped
+  that child on return — so the screen never went off.
+- **`scripts/screen.sh`**: new `guardfg` (foreground twin of `guard`); `on` drops a
+  VETO flag (`/tmp/.screen.on`, tmpfs — cleared by reboot) that the guard honours, so
+  a manual `on` STAYS on. `off`/`guard`/`stop` clear it. v0.9.7 pidfile bug
+  (`$$` vs `$!`) also fixed in all modes.
+
 ## [v0.9.7] — 2026-10-16 — M6 VBUS root-cause DT fix + in-image screen/burn-in automation
 
 Two fixes in one build. Neither needs a p64 reformat: flash the installer-boot
