@@ -156,3 +156,16 @@ Version history lives in [CHANGELOG.md](CHANGELOG.md) and on the [Releases page]
 
 ---
 **Repo maintenance rule:** on every push, update this README's roadmap/status first — this file is the project's source of truth for progress.
+### Screen / burn-in protection (userspace, no kernel change)
+Vendor kernel already ships the display stack (`CONFIG_FB_MSM_MDSS=y`,
+`CONFIG_BACKLIGHT_QCOM_SPMI_WLED=y`). Userspace control:
+- panel: `/sys/class/graphics/fb0/blank` (0=on, 1=blank, 4=power-down). `fb1`/`fb2`
+  are MDSS **writeback** outputs, not the panel — use `fb0`.
+- backlight: `/sys/class/leds/lcd-backlight/brightness` (0..`max_brightness`=4095).
+- helper: `scripts/screen.sh` — `status` | `off` | `on` | `set <n>` |
+  `offdelay [s]` (one-shot) | `toggle [s]` (alternate off/on, burn-in guard) | `stop`.
+  Detached-safe: `sh screen.sh offdelay 90 >/dev/null 2>&1 &`.
+- later (M8): a console on fb0 (`/dev/tty1` + `con2fbmap`) can show uptime / net /
+  IP stats on the panel.
+
+
