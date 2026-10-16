@@ -88,12 +88,11 @@ offdelay)
     kill_prev
     (
         trap '' HUP INT TERM
-        echo $$ > "$PIDF"
         sleep "$N"
         do_off
         echo "$(date '+%H:%M:%S') screen off after ${N}s" >> /root/screen.log
-        rm -f "$PIDF"
     ) >/dev/null 2>&1 &
+    echo $! > "$PIDF"
     echo "offdelay started (${N}s, pid $!)"
     ;;
 toggle)
@@ -101,7 +100,6 @@ toggle)
     kill_prev
     (
         trap '' HUP INT TERM
-        echo $$ > "$PIDF"
         on=1
         while :; do
             sleep "$N"
@@ -109,6 +107,7 @@ toggle)
             else do_on; on=1; fi
         done
     ) >/dev/null 2>&1 &
+    echo $! > "$PIDF"
     echo "toggle started (every ${N}s, pid $!)"
     ;;
 guard)
@@ -116,17 +115,23 @@ guard)
     # seconds. A single offdelay write can be silently undone by the panel
     # driver coming up late; repeating it wins that race. `screen.sh on`
     # (or `stop`) kills the loop, so the manual override is always instant.
+    #
+    # PID FILE: must be $! (the backgrounded subshell), NOT $$ -- inside a
+    # ( ) & subshell $$ is still the PARENT shell's pid, which exits right
+    # after, so the pidfile pointed at a dead process and on/stop could
+    # never kill the guard. $! is the real subshell pid.
     N=${2:-90}; R=${3:-20}
     kill_prev
     (
         trap '' HUP INT TERM
-        echo $$ > "$PIDF"
+        echo "$(date '+%H:%M:%S') guard armed (off in ${N}s, re-assert ${R}s)" >> /root/screen.log
         sleep "$N"
         while :; do
             do_off
             sleep "$R"
         done
     ) >/dev/null 2>&1 &
+    echo $! > "$PIDF"
     echo "guard started (off in ${N}s, re-assert every ${R}s, pid $!)"
     ;;
 stop)
