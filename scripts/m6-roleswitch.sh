@@ -84,6 +84,44 @@ host)
     sync
     ;;
 
+hold)
+    # long guarded window (default 300s, HOLD_S to override): keeps host mode up
+    # long enough for slow devices (LTE dongle, USB-Ethernet) to enumerate, and
+    # logs continuously because console is dead while in host mode.
+    HOLD=${HOLD_S:-300}
+    log "=== M6 hold START (${HOLD}s, auto-rollback after) ==="
+    log "pre : mode=$(cat $MODE) udc=$(cat $UDC)"
+    (
+        trap '' HUP INT TERM
+        i=0
+        while [ $i -lt $HOLD ]; do
+            sleep 5; i=$((i+5))
+            for d in /sys/bus/usb/devices/*/product; do
+                [ -e "$d" ] || continue
+                key="$(dirname $d | xargs basename):$(cat $d)"
+                grep -qF "$key" "$LOG" 2>/dev/null || log "seen: $key"
+            done
+        done
+        echo ""           > "$UDC"  2>/dev/null
+        echo peripheral   > "$MODE" 2>/dev/null
+        sleep 2
+        echo a800000.dwc3 > "$UDC"  2>/dev/null
+        echo "[hold-rollback] mode=$(cat $MODE) udc=$(cat $UDC)" >> "$LOG"
+        sync
+    ) &
+    NET=$!
+    echo ""     > "$UDC"
+    sleep 1
+    echo host   > "$MODE" 2>>"$LOG"
+    sleep 4
+    log "hold: mode=$(cat $MODE 2>/dev/null)"
+    ls -l /sys/bus/usb/devices/ >> "$LOG" 2>&1
+    dmesg | tail -30 >> "$LOG" 2>&1
+    wait $NET
+    log "=== M6 hold END ==="
+    sync
+    ;;
+
 peripheral|device)
     log "manual return to peripheral"
     echo ""           > "$UDC"  2>/dev/null
