@@ -30,7 +30,10 @@ YOU ARE HERE
 
 ### 🔜 Next
 
-- **M6 — USB OTG host mode (pocket modem).** dwc3 as HOST: tethered phone USB → Wayne WAN → NAT. Single UDC = device XOR host; tear the gadget down cleanly; NEVER unbind dwc3 (panics this kernel). *Done when:* a client gets internet THROUGH Wayne via NAT.
+- **M6 — USB OTG host mode (pocket modem).** dwc3 as HOST: tethered phone USB → Wayne WAN → NAT. Single UDC = device XOR host; tear the gadget down cleanly; NEVER unbind dwc3 (panics this kernel).
+  - **Lever (found 2026-10-15):** `/sys/devices/platform/soc/a800000.ssusb/mode` = the role switch (`peripheral`|`host`). No `usb_role_switch` class on 4.19; extcon0..4 exist but are read-only notifications. PD phy extcon `USB=1` confirms cable presence.
+  - **Test harness:** `scripts/m6-roleswitch.sh` — `status` (read-only), `host` (guarded flip + 60s auto-rollback), `peripheral` (manual return). Must run **detached** (`>/dev/null 2>&1 &`) because the flip kills both SSH and the ttyGS0 console. Log → `/root/m6.log`.
+  - *Done when:* a client gets internet THROUGH Wayne via NAT.
 - **M7 — Docker feasibility probe on 4.19 (open question, not a promise).** Check live kernel features (`/proc/cgroups`, namespaces, `overlay`), try a static dockerd → `docker run hello-world`. YES → M8 includes Docker. NO → v1.0 runs services native (procd + Hermes), Docker revisited on the future mainline track. *Done when:* probe answered with evidence.
 - **M8 — Full OpenWrt experience on 21.02 (the biggest open surface).** Stock armvirt/64 rootfs ships NONE of this today — all of it gets built/probed here:
   - **LuCI webui** — package it into the image (opkg at CI time), reachable over usb0/ethernet; phone = router you configure in a browser.
