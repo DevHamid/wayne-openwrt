@@ -161,6 +161,21 @@ jobs:
           echo "--- verify in tree ---"
           grep -n "vbus_dwc3-supply" arch/arm64/boot/dts/vendor/qcom/sdm660-common.dtsi
 
+      # v0.9.7 shipped the DT fix but host mode REGRESSED on-device: the supply
+      # is now valid, so regulator_enable() actually runs, and when the charger
+      # refuses it dwc3_otg_start_host() returns BEFORE dwc3_host_init() -> no
+      # xHCI at all (usb_devs empty). Make a VBUS failure non-fatal so host mode
+      # always comes up, and log the rc the charger hid (its smblib_err() is
+      # compiled out). Both patches are idempotent.
+      - name: Apply M6 VBUS non-fatal + charger diagnostics
+        run: |
+          cd kernel
+          sh ../patches/dwc3-vbus-nonfatal.sh
+          sh ../patches/charger-vbus-diag.sh
+          echo "--- verify in tree ---"
+          grep -n "M6: vbus failure is non-fatal" drivers/usb/dwc3/dwc3-msm.c
+          grep -n "M6 diag" drivers/power/supply/qcom/smb-lib.c
+
       - name: Download mkbootimg tools
         run: |
           git clone --depth=1 https://android.googlesource.com/platform/system/tools/mkbootimg mkboot -b master-kernel-build-2022

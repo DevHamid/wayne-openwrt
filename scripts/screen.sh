@@ -12,21 +12,28 @@
 # USAGE:
 #   sh screen.sh status            # read-only
 #   sh screen.sh off               # blank panel (fb0=4) + backlight 0
-#   sh screen.sh on                # unblank + restore saved brightness
+#   sh screen.sh on                # unblank + restore saved brightness (VETOES guard)
 #   sh screen.sh set 1200          # set backlight 0..4095
 #   sh screen.sh offdelay 90       # turn off once, after 90s  (detached)
 #   sh screen.sh toggle 90         # alternate off/on every 90s (burn-in guard)
-#   sh screen.sh guard 90 20       # off after 90s, then RE-ASSERT off every 20s
-#                                   #   (boot guard: survives late driver re-enable)
-#   sh screen.sh stop              # kill any running offdelay/guard/toggle
+#   sh screen.sh guard 90 20       # off after 90s, then RE-ASSERT off every 20s (detached)
+#   sh screen.sh guardfg 90 20     # same but FOREGROUND (for procd supervision)
+#   sh screen.sh stop              # kill any running daemon and turn the screen on
 #
-# Detached-safe: `sh screen.sh offdelay 90 >/dev/null 2>&1 &`
+# OVERRIDE (why `on` sticks now): the guard re-asserts OFF every R seconds, so a
+# plain one-shot `on` would be undone on the next tick. `on` therefore drops a
+# VETO FLAG (/tmp/.screen.on) that the guard loop honours: while it exists the
+# guard keeps the screen ON instead of off. `off` / `guard` clear the flag.
+# /tmp is tmpfs, so a reboot clears it and the boot guard blanks again.
+#
+# Detached-safe: `sh screen.sh guard 90 20 >/dev/null 2>&1 &`
 
 FB=/sys/class/graphics/fb0
 BL=/sys/class/leds/lcd-backlight/brightness
 MAXF=/sys/class/leds/lcd-backlight/max_brightness
 STATE=/root/.screen.bright
 PIDF=/root/.screen.pid
+VETO=/tmp/.screen.on
 
 max() { cat "$MAXF" 2>/dev/null || echo 4095; }
 
@@ -68,6 +75,8 @@ status)
     echo "fb0/blank  : $(cat $FB/blank 2>/dev/null)"
     echo "brightness : $(cat $BL 2>/dev/null) / $(max)"
     echo "saved      : $(cat $STATE 2>/dev/null)"
+    [ -f "$VETO" ] && echo "override   : ON (guard will keep it lit)" \
+                   || echo "override   : off (guard blanks the panel)"
     if [ -f "$PIDF" ] && kill -0 "$(cat $PIDF)" 2>/dev/null; then
         echo "daemon     : running (pid $(cat $PIDF))"
     else
@@ -75,21 +84,25 @@ status)
     fi
     ;;
 off)
-    do_off; echo "screen off"
+    rm -f "$VETO"; do_off; echo "screen off"
     ;;
 on)
-    kill_prev; do_on; echo "screen on (brightness=$(cat $STATE 2>/dev/null))"
+    # Veto the guard FIRST, then kill any detached daemon, then light up.
+    # (kill_prev is harmless if the guard runs under procd -- that instance is
+    #  not tracked in the pidfile; the veto flag is what makes `on` stick.)
+    touch "$VETO"; kill_prev; do_on
+    echo "screen on (brightness=$(cat $STATE 2>/dev/null))"
     ;;
 set)
     kill_prev; [ -n "$2" ] && echo "$2" > "$BL" 2>/dev/null && echo "brightness=$2"
     ;;
 offdelay)
     N=${2:-90}
-    kill_prev
+    kill_prev; rm -f "$VETO"
     (
         trap '' HUP INT TERM
         sleep "$N"
-        do_off
+        [ -f "$VETO" ] || do_off
         echo "$(date '+%H:%M:%S') screen off after ${N}s" >> /root/screen.log
     ) >/dev/null 2>&1 &
     echo $! > "$PIDF"
@@ -97,13 +110,14 @@ offdelay)
     ;;
 toggle)
     N=${2:-90}
-    kill_prev
+    kill_prev; rm -f "$VETO"
     (
         trap '' HUP INT TERM
         on=1
         while :; do
             sleep "$N"
-            if [ "$on" = 1 ]; then do_off; on=0
+            if [ -f "$VETO" ]; then on=0; do_on
+            elif [ "$on" = 1 ]; then do_off; on=0
             else do_on; on=1; fi
         done
     ) >/dev/null 2>&1 &
@@ -111,33 +125,39 @@ toggle)
     echo "toggle started (every ${N}s, pid $!)"
     ;;
 guard)
-    # BOOT GUARD: blank after N seconds, then keep re-asserting it every R
-    # seconds. A single offdelay write can be silently undone by the panel
-    # driver coming up late; repeating it wins that race. `screen.sh on`
-    # (or `stop`) kills the loop, so the manual override is always instant.
-    #
-    # PID FILE: must be $! (the backgrounded subshell), NOT $$ -- inside a
-    # ( ) & subshell $$ is still the PARENT shell's pid, which exits right
-    # after, so the pidfile pointed at a dead process and on/stop could
-    # never kill the guard. $! is the real subshell pid.
+    # DETACHED boot guard. See guardfg for the procd (foreground) twin.
     N=${2:-90}; R=${3:-20}
-    kill_prev
+    kill_prev; rm -f "$VETO"
     (
         trap '' HUP INT TERM
         echo "$(date '+%H:%M:%S') guard armed (off in ${N}s, re-assert ${R}s)" >> /root/screen.log
         sleep "$N"
         while :; do
-            do_off
+            [ -f "$VETO" ] && do_on || do_off
             sleep "$R"
         done
     ) >/dev/null 2>&1 &
     echo $! > "$PIDF"
     echo "guard started (off in ${N}s, re-assert every ${R}s, pid $!)"
     ;;
+guardfg)
+    # FOREGROUND twin of `guard`, run by procd (burnin-guard init script).
+    # procd keeps it alive and restarts it if it dies -- far more reliable than
+    # backgrounding a child from an init script, which procd reaps on return.
+    # The VETO flag lets `screen.sh on` win without fighting a respawned guard.
+    N=${2:-90}; R=${3:-20}
+    kill_prev; rm -f "$VETO"
+    echo "$(date '+%H:%M:%S') guardfg armed (off in ${N}s, re-assert ${R}s)" >> /root/screen.log
+    sleep "$N"
+    while :; do
+        [ -f "$VETO" ] && do_on || do_off
+        sleep "$R"
+    done
+    ;;
 stop)
-    kill_prev; do_on; echo "daemon stopped, screen on"
+    rm -f "$VETO"; kill_prev; do_on; echo "daemon stopped, screen on"
     ;;
 *)
-    echo "usage: $0 {status|off|on|set <0-4095>|offdelay [s]|toggle [s]|guard [s] [r]|stop}"
+    echo "usage: $0 {status|off|on|set <0-4095>|offdelay [s]|toggle [s]|guard [s] [r]|guardfg [s] [r]|stop}"
     ;;
 esac
