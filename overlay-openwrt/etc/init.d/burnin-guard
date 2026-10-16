@@ -1,0 +1,17 @@
+#!/bin/sh /etc/rc.common
+# burnin-guard: blank the panel + kill backlight after BOOT_IDLE seconds.
+# Stops burn-in while the phone sits on the MI/fastboot logo during bring-up.
+# Manual override any time:  sh /root/screen.sh on   |   /etc/init.d/burnin-guard stop
+START=99
+USE_PROCD=0
+BOOT_IDLE=90
+
+start() {
+    [ -x /root/screen.sh ] || return 0
+    /root/screen.sh offdelay "$BOOT_IDLE" >/dev/null 2>&1 &
+}
+
+stop() {
+    [ -x /root/screen.sh ] || return 0
+    /root/screen.sh stop >/dev/null 2>&1
+}

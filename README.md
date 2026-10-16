@@ -162,6 +162,11 @@ Vendor kernel already ships the display stack (`CONFIG_FB_MSM_MDSS=y`,
 - panel: `/sys/class/graphics/fb0/blank` (0=on, 1=blank, 4=power-down). `fb1`/`fb2`
   are MDSS **writeback** outputs, not the panel — use `fb0`.
 - backlight: `/sys/class/leds/lcd-backlight/brightness` (0..`max_brightness`=4095).
+- build-time auto-guard: `overlay-openwrt/etc/init.d/burnin-guard` (START=99) runs
+  `screen.sh offdelay 90` at every boot, so the panel goes dark 90s after boot
+  (no more lit logo burning in). Override: `/etc/init.d/burnin-guard stop`, or
+  `sh /root/screen.sh on` to light it up manually. Will be replaced by the M8
+  on-panel stats display later.
 - helper: `scripts/screen.sh` — `status` | `off` | `on` | `set <n>` |
   `offdelay [s]` (one-shot) | `toggle [s]` (alternate off/on, burn-in guard) | `stop`.
   Detached-safe: `sh screen.sh offdelay 90 >/dev/null 2>&1 &`.
