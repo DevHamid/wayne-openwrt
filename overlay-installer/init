@@ -180,7 +180,7 @@ say "installing burn-in guard (screen off automation)"
 }
 # M6 host-mode harness (same idempotent reason as screen.sh: p64 already
 # installed => the initramfs copy is skipped, so re-copy it every boot).
-for _f in m6.sh vbus-host-test.sh; do
+for _f in m6.sh vbus-host-test.sh m7.sh; do
     [ -r "/root/$_f" ] && {
         mkdir -p "$MNT/root"
         cp "/root/$_f" "$MNT/root/$_f"

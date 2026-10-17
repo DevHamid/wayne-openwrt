@@ -129,6 +129,10 @@ jobs:
           cp ../../scripts/m6-roleswitch.sh root/m6.sh
           cp ../../scripts/vbus-host-test.sh root/vbus-host-test.sh
           chmod +x root/m6.sh root/vbus-host-test.sh
+          # M7 probe: answers "can 4.19 run Docker?" with /proc + real mounts
+          # instead of a defconfig read. Read-only except temp probe objects.
+          cp ../../scripts/m7-docker-probe.sh root/m7.sh
+          chmod +x root/m7.sh
           cp ../../overlay-openwrt/etc/init.d/burnin-guard etc/init.d/burnin-guard
           chmod +x etc/init.d/burnin-guard
           ln -sf ../init.d/burnin-guard etc/rc.d/S99burnin-guard

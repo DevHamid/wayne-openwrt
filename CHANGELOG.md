@@ -6,6 +6,23 @@ where each release also carries the built boot images as downloadable assets.
 
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [v0.9.10] — M7 probe script
+
+`scripts/m7-docker-probe.sh` → `/root/m7.sh` (installed by `build.yml`, re-copied
+by `overlay-installer/init`). Answers M7 with the running kernel:
+
+- `/proc/cgroups` listing + a real memcg mount that must ACCEPT
+  `memory.limit_in_bytes` (listing alone is not proof).
+- freezer / pids / devices cgroup mounts.
+- `unshare -n` (a net namespace must open, not merely exist).
+- overlay mount with copy-up write on the real root filesystem — the exact
+  thing `overlay2` needs.
+- veth pair + bridge creation, MASQUERADE rule insert/delete.
+- RAM/disk headroom and whether a `docker` binary exists.
+
+Verdict: `M7=YES` / `M7=DEGRADED` / `M7=NO`, written to `/root/m7.log`.
+Read-only apart from temporary objects it removes.
+
 ## [v0.9.10] — 2026-10-17 — M7 prep: container kernel enablers
 
 Kernel config audit for the Docker probe. Vendor defconfig already carried
