@@ -6,13 +6,13 @@
 
 ## Roadmap (interactive blueprint)
 
-**Overall progress: ████████░░░░░░░░░░░░ ≈ 50%** — M1–M5 done.
+**Overall progress: ██████████░░░░░░░░░ ≈ 60%** — M1–M4, M6, M7 done (M5 at 95%).
 
 ```
 YOU ARE HERE
     ▼
-[M1✅][M2✅][M3✅][M4✅][M5✅][M6✅][M7? ][M8  ][M9★ ][FUT ]
- kernel  RAM   root  boot  SSH   host  dock? 21svc zip   mainline later
+[M1✅][M2✅][M3✅][M4✅][M5✅][M6✅][M7✅][M8  ][M9★ ][FUT ]
+ kernel  RAM   root  boot  SSH   host  dock✗ 21svc zip   mainline later
                                               = finish: OrangeFox-flashable ROM
 ```
 
@@ -26,6 +26,7 @@ YOU ARE HERE
 | M4 | Standalone boot, no PC (p58 flashed) | 100% |
 | M5 | USB gadget ethernet + serial → SSH (v0.9.6, 2026-10-15) | 95% |
 | M6 | USB OTG **host** mode — VBUS 5V + real device enumeration (2026-10-17) | 100% |
+| M7 | Docker feasibility probe on 4.19 (v0.9.10, real device, 2026-10-17) | 100% — answer: **NO** |
 
 - **M5:** ONE configfs gadget (`g1`) = ACM serial (`ttyGS0`↔`ttyACM0`) + RNDIS ethernet (`usb0`↔PC). DHCP + dropbear → `ssh root@192.168.42.1`. Dropbear duplicate-`Interface` bug fixed (normalize to single `usb0` each boot). *Closeout:* flash v0.9.6 installer-boot → zero-touch SSH; re-test on a good USB port (PC port 3-1.2 is a bad Acer hub, not the phone).
 
@@ -38,7 +39,7 @@ YOU ARE HERE
   - **VBUS / OTG power investigation (2026-10-16):** host mode comes up (xHCI bus1+bus2) but with a real device seated on an OTG hub the port shows ZERO enumeration - dmesg never sees a plug event. Evidence: `extcon3 (qpnp-smb2): USB=0 USB-HOST=0` while host is up (charger never notified of host role) and `regulator.75 smb2-vbus state=disabled` (port not sourcing 5V). `scripts/vbus-probe.sh` flips to host, dumps extcon/regulator/power_supply state, attempts `smb2-vbus` enable, auto-rolls back. Log -> `/root/vbus.log`. HARDENED v2 (2026-10-16): a host-mode dump can HANG on a sysfs read (port electrically dead to PC, dwc3 mid-transition); v1 hung, never rolled back, UDC left empty -> BOTH ssh and ttyGS0 dead -> reboot required. v2 adds an INDEPENDENT watchdog that forces peripheral at T+25s even if the main body hangs, drops `find /sys`, and bounds every sysfs read with `timeout`. RULE: never touch the USB cable during a host-mode test. LATEST (2026-10-16): `regulator.75/state` is 0444 -> NOT writable from userspace, root or not; the enable path must be in-kernel. A writable gate `/sys/module/policy_engine/parameters/pd_vbus_ctrl` (rw; `echo 1` accepted 0->1) was tested with `scripts/vbus-host-test.sh` (pd_vbus_ctrl=1 + host flip, logs extcon3/extcon4/regulator.75/BOOST_CURRENT every 5s for 120s, watchdog rollback) -- RESULT: it changed NOTHING. For 120s in host mode `extcon3 (qpnp-smb2)` stayed USB=0/USB-HOST=0, `regulator.75 smb2-vbus` stayed disabled, BOOST_CURRENT=0, and only the two root hubs appeared (no downstream device). So pd_vbus_ctrl is NOT the lever. ROOT CAUSE FOUND (source-verified in DevHamid/LKGeek_sdm660@build-all-rekernel): `dwc3_otg_start_host()` (drivers/usb/dwc3/dwc3-msm.c) raises the OTG 5V boost ONLY through `devm_regulator_get_optional(dev, "vbus_dwc3")` and then `regulator_enable()`; the stock `ssusb@a800000` DT node (sdm660-common.dtsi) declares `USB3_GDSC-supply` + `dpdm-supply` but NO `vbus_dwc3-supply`, so get_optional returns NULL and enable is silently skipped -> smb2-vbus never rises -> nothing enumerates. Android hides this because its userspace USB HAL enables smb2-vbus itself; OpenWrt has no such HAL. STATUS (v0.9.7 on-device, 2026-10-16): the DT fix landed but host mode REGRESSED -- dmesg shows `unable to enable vbus_reg` then `unable to start host`, and usb_devs was EMPTY the whole run (v0.9.6 at least brought up the xHCI root hubs). Reason: with the supply now valid, regulator_enable() actually runs; when the charger refuses it, dwc3_otg_start_host() returned BEFORE dwc3_host_init() -> no xHCI at all. v0.9.8 fixes this two ways (patches/dwc3-vbus-nonfatal.sh + patches/charger-vbus-diag.sh): (1) a VBUS failure is now NON-FATAL -- log rc, continue -> host mode always comes up (as in v0.9.6) and we finally SEE the charger rc; (2) smb-lib.c compiled out ALL its error logging (#ifdef DEBUG; the Makefile never defines it) -> unconditional pr_err at every enable-path branch (ENTER / votable NULL / OTG_CFG write fail / boost softstart TIMEOUT / EXIT FAILED rc=N). The `M6 diag ...` dmesg lines from the next flash pinpoint the exact failure. Next: rebuild+flash, seat an OTG device, read the `M6 diag` line, confirm reg75=enabled and a `1-1:` device appears.
   - **CORE PROVEN (2026-10-16, real device):** clean teardown → `mode=host` → xHCI up on BOTH buses (USB2 `1d6b:0002` + USB3 SuperSpeed `1d6b:0003`, 1 port each) → auto-rollback restores `mode=peripheral` + UDC bound, SSH/serial returned. Remaining: downstream device enumeration (needs a real USB device on OTG — PC is a host, invisible to host mode) and VBUS power if a bus-powered device stays dark.
   - *Done when:* a client gets internet THROUGH Wayne via NAT.
-- **M7 — Docker feasibility probe on 4.19 (open question, not a promise).** Check live kernel features (`/proc/cgroups`, namespaces, `overlay`), try a static dockerd → `docker run hello-world`. YES → M8 includes Docker. NO → v1.0 runs services native (procd + Hermes), Docker revisited on the future mainline track. *Done when:* probe answered with evidence.
+- **M7 — Docker feasibility probe on 4.19. ✅ ANSWERED 2026-10-17: `M7=NO`** (v0.9.10 `/root/m7.sh` on the real device; log `/root/m7.log`). ONE real blocker: `CONFIG_MEMCG` off — vendor `mm/` refused to compile with it (bisect f6613d1 → 3f840e6 kept the build green), so dockerd dies with "kernel does not support memory limit capabilities". Everything else Docker needs PASSED: overlayfs mount + copy-up write on the ext4 p64 rootfs, veth pair, bridge, MASQUERADE, net/mnt/pid/uts/ipc namespaces, and freezer/pids/devices controllers — proof the v0.9.10 fragment additions landed and run. Two of the probe's three `fatal`s decoded as false negatives: `memory cgroup mount failed` = same MEMCG root cause (double-counted); `unshare -n rejected` = busybox built WITHOUT the `unshare` applet (`rc=127`, not a kernel gap — `CONFIG_NET_NS=y` and the net namespace PASS). CEILING even after a MEMCG build = DEGRADED only: `CONFIG_SECCOMP` off (dockerd would need `--security-opt seccomp=unconfined`, no syscall sandbox) and LKGeek dropped `br_netfilter` (published-port DNAT across docker0 depends on the userland proxy). **DECISION (2026-10-17): accept NO — v1.0 runs services native (procd + Hermes), matching the Orange Pi reference minus Docker. Docker revisited on the mainline track.** Cheap prep whenever wanted: enable the busybox `unshare` applet (userspace-only, zero kernel risk).
   - **Kernel audit 2026-10-17 (v0.9.10).** The vendor defconfig already had `CGROUPS`, `CGROUP_SCHED`, `CGROUP_CPUACCT`, `NAMESPACES`, `NET_NS`, `OVERLAY_FS`, `BRIDGE`, `NF_NAT`, `NETFILTER_XT_TARGET_MASQUERADE`. Missing and now added to the fragment: `MEMCG`, `MEMCG_SWAP`, `CGROUP_DEVICE`, `CGROUP_FREEZER`, `CGROUP_PIDS`, `VETH`, `BRIDGE_NETFILTER`. Without `MEMCG` dockerd aborts with "kernel does not support memory limit capabilities"; without `VETH` containers get no network. `USER_NS` stays OFF (vendor default) — dockerd does not need it, only rootless mode does.
   - **Probe shipped (v0.9.10):** `scripts/m7-docker-probe.sh` → `/root/m7.sh`. One line: `sh /root/m7.sh`. It reads `/proc/cgroups`, mounts memory/freezer/pids/devices, opens a fresh net namespace (`unshare -n`), does a REAL overlay mount with copy-up write on the actual root filesystem, creates a veth pair + bridge, and pushes a MASQUERADE rule. Verdict line: `M7=YES` / `M7=DEGRADED` / `M7=NO`. Log: `/root/m7.log`. Read-only apart from temp objects it deletes; touches no USB, display or partition.
   - **Still unknown until booted:** whether `overlay2` works on this f2fs/ext4 rootfs, whether dockerd starts under 4.19 without a seccomp profile fight, and real memory headroom (3 GB RAM, OpenWrt base is ~50 MB). Those are answered by the probe, not by reading config.
@@ -46,7 +47,7 @@ YOU ARE HERE
   - **LuCI webui** — package it into the image (opkg at CI time), reachable over usb0/ethernet; phone = router you configure in a browser.
   - **Wi-Fi — AP (hotspot) vs client mode** — probe vendor `qcacld-3.0`/wlan driver against hostapd/wpa_supplicant on 4.19; vendor driver is cfg80211-based, so AP *may* work natively, but unproven → answer with evidence, not hope.
   - **Cellular data** — SDM660 modem reachable only via Qualcomm IPC/QRTR stack (Android used qmuxd); bring-up = probe qrtr + data-path on 4.19. Hard, honest odds, same evidence rule.
-  - **Customization** — opkg feeds, themes, extra services, dockerman only if M7 says yes.
+  - **Customization** — opkg feeds, themes, extra services. No dockerman: M7 answered NO (Docker lives on the mainline track).
   - Also: Hermes agent port, firewall/NAT zones (lan/usb0/wan).
   *Done when:* Wayne routes + serves (webui up, wifi + modem probed with YES/NO evidence) with config surviving reboot.
 - **M9★ — Polish + recovery-flashable ROM → v1.0.** Baked-in root password, RTC/NTP at boot, thermal/charging, USB reconnect watchdog. **The actual finish = flashable OpenWrt ROM for TWRP/OrangeFox**: recovery zip (`updater-script`/`update-binary`) writing boot image + rootfs to p64 with the 5 p64-only guards. *Done when:* zip flashed from OrangeFox → phone boots → SSH works → tag `v1.0`.
@@ -65,7 +66,7 @@ YOU ARE HERE
 ### ⚠️ Top risks
 
 1. **M6 single-port exclusivity** — gadget vs host can't coexist; design the switch deliberately.
-2. **M7 Docker-on-4.19 odds** — vendor kernel may lack container features; scope v1.0 to survive a NO.
+2. ~~**M7 Docker-on-4.19 odds**~~ — ANSWERED 2026-10-17: NO (MEMCG + seccomp absent; everything else green). v1.0 already scoped native, so the schedule is untouched.
 3. **Vendor modem/Wi-Fi ceiling** — define v1.0 by what works (USB networking + routing + services), not by missing radios.
 
 ## How it works
