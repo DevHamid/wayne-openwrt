@@ -6,7 +6,7 @@
 
 ## Roadmap (interactive blueprint)
 
-**Overall progress: ██████████░░░░░░░░░ ≈ 60%** — M1–M4, M6, M7 done (M5 at 95%).
+**Overall progress: ██████████░░░░░░░░░ ≈ 60%** — M1–M6 done, M7 re-testing (MEMCG build v0.9.11).
 
 ```
 YOU ARE HERE
