@@ -136,6 +136,10 @@ jobs:
           cp ../../overlay-openwrt/etc/init.d/burnin-guard etc/init.d/burnin-guard
           chmod +x etc/init.d/burnin-guard
           ln -sf ../init.d/burnin-guard etc/rc.d/S99burnin-guard
+          # M8a: WebUI over RNDIS — fixed LAN IP + usb0 into br-lan
+          mkdir -p etc/uci-defaults
+          cp ../../overlay-openwrt/etc/uci-defaults/90-usb0-lan etc/uci-defaults/90-usb0-lan
+          chmod +x etc/uci-defaults/90-usb0-lan
           echo "burnin guard installed: $(ls -l etc/rc.d/S99burnin-guard)"
           (find . -print0 | cpio --null -o --format=newc 2>/dev/null | gzip -9 > ../openwrt-initramfs.cpio.gz)
           ls -lh ../openwrt-initramfs.cpio.gz

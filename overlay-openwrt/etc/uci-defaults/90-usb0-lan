@@ -1,0 +1,26 @@
+#!/bin/sh
+# /etc/uci-defaults/90-usb0-lan -- runs once on first boot, then deletes itself.
+#
+# M8a: WebUI over RNDIS.
+# Root cause: /init brings up usb0 (RNDIS) but nothing assigns it an address or
+# bridges it into br-lan, so the PC sees the link but LuCI is unreachable.
+# Fix: put usb0 in br-lan and pin lan to 192.168.1.100.
+#
+# NOTE: stock OpenWrt dhcp.lan pool is .100-.249, which would collide with
+# lan=.100, so the pool is moved to .110-.249.
+
+uci -q batch <<"EOF"
+set network.lan.ipaddr=192.168.1.100
+set network.lan.netmask=255.255.255.0
+add_list network.lan.ifname=usb0
+commit network
+
+set dhcp.lan.start=110
+set dhcp.lan.limit=140
+commit dhcp
+EOF
+
+/etc/init.d/network restart >/dev/null 2>&1
+/etc/init.d/dnsmasq restart >/dev/null 2>&1
+
+exit 0
