@@ -6,6 +6,28 @@ where each release also carries the built boot images as downloadable assets.
 
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [v0.9.10] — 2026-10-17 — M7 prep: container kernel enablers
+
+Kernel config audit for the Docker probe. Vendor defconfig already carried
+`CGROUPS`, `CGROUP_SCHED`, `CGROUP_CPUACCT`, `NAMESPACES`, `NET_NS`,
+`OVERLAY_FS`, `BRIDGE`, `NF_NAT`, `NETFILTER_XT_TARGET_MASQUERADE`.
+
+Added to `kernel-config-fragment.txt` (pure enablers, no behaviour change):
+
+```
+CONFIG_MEMCG=y  CONFIG_MEMCG_SWAP=y
+CONFIG_CGROUP_DEVICE=y  CONFIG_CGROUP_FREEZER=y  CONFIG_CGROUP_PIDS=y
+CONFIG_VETH=y  CONFIG_BRIDGE_NETFILTER=y
+```
+
+- No `MEMCG` → dockerd exits with *"kernel does not support memory limit
+  capabilities"*.
+- No `VETH` → containers start but have no network.
+- `USER_NS` deliberately left OFF (vendor default). Only rootless Docker needs
+  it; root dockerd does not.
+- `overlay2` on f2fs/ext4 and real RAM headroom remain probe questions, not
+  config questions.
+
 ## [v0.9.9] — 2026-10-17 — M6 proven working + screen backlight node fixed
 
 ### M6 — USB OTG host mode: WORKS (no kernel patch needed)

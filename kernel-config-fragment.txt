@@ -143,3 +143,26 @@ CONFIG_USB_ACM=y
 # The legacy USB_MASS_STORAGE (gadget) is deliberately NOT set: it shares the
 # "precomposed gadgets" single-select choice with USB_G_SERIAL, and setting
 # both makes kconfig silently drop one -- the same trap documented above.
+
+# ===========================================================================
+# v0.9.10 -- M7 Docker prerequisites (open probe)
+# ===========================================================================
+# AUDIT (2026-10-17) against the vendor defconfig + this fragment:
+#   present : CGROUPS, CGROUP_CPUACCT, CGROUP_SCHED, NAMESPACES, NET_NS,
+#             OVERLAY_FS, BRIDGE, NF_NAT, NETFILTER_XT_TARGET_MASQUERADE
+#   MISSING : MEMCG, CGROUP_DEVICE, CGROUP_FREEZER, CGROUP_PIDS, VETH
+# dockerd/runc refuse to start without a memory cgroup controller
+# ("Your kernel does not support memory limit capabilities"), and containers
+# get no network without veth pairs. These are pure enablers: nothing above
+# changes existing boot behaviour.
+CONFIG_MEMCG=y
+CONFIG_MEMCG_SWAP=y
+CONFIG_CGROUP_DEVICE=y
+CONFIG_CGROUP_FREEZER=y
+CONFIG_CGROUP_PIDS=y
+CONFIG_CGROUP_SCHED=y
+CONFIG_VETH=y
+# Network namespaces are already on; the veth peer needs the bridge module
+# only when docker0 bridging is used (it is the default driver).
+CONFIG_BRIDGE=y
+CONFIG_BRIDGE_NETFILTER=y
