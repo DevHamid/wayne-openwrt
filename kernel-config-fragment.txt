@@ -145,20 +145,26 @@ CONFIG_USB_ACM=y
 # both makes kconfig silently drop one -- the same trap documented above.
 
 # ===========================================================================
-# v0.9.10 -- M7 Docker prerequisites (open probe)
+# v0.9.11 -- M7 Docker prerequisites (full enablers)
 # ===========================================================================
-# AUDIT (2026-10-17) against the vendor defconfig + this fragment:
+# AUDIT against the vendor defconfig + this fragment:
 #   present : CGROUPS, CGROUP_CPUACCT, CGROUP_SCHED, NAMESPACES, NET_NS,
-#             OVERLAY_FS, BRIDGE, NF_NAT, NETFILTER_XT_TARGET_MASQUERADE
-#   MISSING : MEMCG, CGROUP_DEVICE, CGROUP_FREEZER, CGROUP_PIDS, VETH
+#             OVERLAY_FS, BRIDGE, NF_NAT, NETFILTER_XT_TARGET_MASQUERADE,
+#             CGROUP_DEVICE, CGROUP_FREEZER, CGROUP_PIDS, VETH
+#   added   : MEMCG, MEMCG_SWAP
 # dockerd/runc refuse to start without a memory cgroup controller
 # ("Your kernel does not support memory limit capabilities"), and containers
-# get no network without veth pairs. These are pure enablers: nothing above
+# get no network without veth pairs. These are pure enablers; nothing here
 # changes existing boot behaviour.
-# MEMCG deliberately withheld in this commit: run f6613d1 (which failed the
-# kernel build) without it to bisect. If this build is green, MEMCG is the
-# breaker and the vendor mm/ tree does not compile with it.
-# CONFIG_MEMCG is not set
+#
+# BRIDGE_NETFILTER is deliberately NOT set (proven 2026-10-17 in 3f840e6):
+# vendor br_private.h lacks nf_call_* members, br_netlink.c fails to compile.
+# LKGeek dropped br_netfilter. docker0 bridging works but iptables never sees
+# bridged frames; published-port DNAT relies on userland proxy
+# (docker --userland-proxy=true, its default). Do not re-add without porting.
+
+CONFIG_MEMCG=y
+CONFIG_MEMCG_SWAP=y
 CONFIG_CGROUP_DEVICE=y
 CONFIG_CGROUP_FREEZER=y
 CONFIG_CGROUP_PIDS=y
@@ -167,12 +173,3 @@ CONFIG_VETH=y
 # Network namespaces are already on; the veth peer needs the bridge module
 # only when docker0 bridging is used (it is the default driver).
 CONFIG_BRIDGE=y
-# CONFIG_BRIDGE_NETFILTER is deliberately NOT set. Proven 2026-10-17: this
-# vendor tree's net/bridge/br_private.h has no nf_call_iptables / _ip6tables /
-# _arptables members, so br_netlink.c fails to compile:
-#   error: no member named 'nf_call_iptables' in 'struct net_bridge'
-# LKGeek dropped br_netfilter. Consequence for M7: docker0 bridging still works,
-# but iptables never sees bridged frames, so net.bridge.bridge-nf-call-iptables
-# is a no-op and published-port DNAT across the bridge needs the userland proxy
-# (docker --userland-proxy=true, its default) to hold. Record it as a probe
-# limitation, do not re-add this symbol without porting br_netfilter.
