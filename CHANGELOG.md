@@ -45,6 +45,14 @@ path softstarts first try.
 - Clean teardown confirmed on PC replug: `Nothing attached`, `reg75=disabled`,
   `usb_devs=` empty, xhci buses deregistered.
 
+### Build: M6 harness is now part of the image
+
+`/root/m6.sh` (role switch + 60s auto-rollback) and `/root/vbus-host-test.sh`
+(detached VBUS/enumeration probe) are installed by `build.yml` and re-copied to
+the target rootfs by `overlay-installer/init` on every boot, exactly like
+`screen.sh`. Previously they only existed in the repo, so every reflash meant
+retyping them one line at a time over the serial console.
+
 ### Screen: the guard ran but wrote a stub
 
 `screen.sh off` set `brightness 0` and the panel stayed lit. The guard was
