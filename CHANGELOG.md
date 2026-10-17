@@ -20,6 +20,13 @@ CONFIG_CGROUP_DEVICE=y  CONFIG_CGROUP_FREEZER=y  CONFIG_CGROUP_PIDS=y
 CONFIG_VETH=y  CONFIG_BRIDGE_NETFILTER=y
 ```
 
+**Resolved 2026-10-17:** the build failure was `CONFIG_BRIDGE_NETFILTER=y`.
+`net/bridge/br_netlink.c` references `nf_call_iptables` / `nf_call_ip6tables` /
+`nf_call_arptables`, members that this vendor `br_private.h` does not have
+(LKGeek removed br_netfilter). Symbol dropped; `VETH` + `BRIDGE` +
+`CGROUP_DEVICE/FREEZER/PIDS` all compiled. Docker's userland proxy covers the
+missing bridged-frame filtering for published ports.
+
 **Bisect note:** the first commit carrying all of these (`f6613d1`) failed the
 kernel-build step, so this entry describes the *intended* set. The shipped
 order is cgroup-device/freezer/pids + veth + bridge-netfilter first; `MEMCG*`

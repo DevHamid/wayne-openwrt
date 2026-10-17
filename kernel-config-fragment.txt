@@ -167,4 +167,12 @@ CONFIG_VETH=y
 # Network namespaces are already on; the veth peer needs the bridge module
 # only when docker0 bridging is used (it is the default driver).
 CONFIG_BRIDGE=y
-CONFIG_BRIDGE_NETFILTER=y
+# CONFIG_BRIDGE_NETFILTER is deliberately NOT set. Proven 2026-10-17: this
+# vendor tree's net/bridge/br_private.h has no nf_call_iptables / _ip6tables /
+# _arptables members, so br_netlink.c fails to compile:
+#   error: no member named 'nf_call_iptables' in 'struct net_bridge'
+# LKGeek dropped br_netfilter. Consequence for M7: docker0 bridging still works,
+# but iptables never sees bridged frames, so net.bridge.bridge-nf-call-iptables
+# is a no-op and published-port DNAT across the bridge needs the userland proxy
+# (docker --userland-proxy=true, its default) to hold. Record it as a probe
+# limitation, do not re-add this symbol without porting br_netfilter.
