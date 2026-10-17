@@ -15,10 +15,17 @@ Kernel config audit for the Docker probe. Vendor defconfig already carried
 Added to `kernel-config-fragment.txt` (pure enablers, no behaviour change):
 
 ```
-CONFIG_MEMCG=y  CONFIG_MEMCG_SWAP=y
+CONFIG_MEMCG=y  CONFIG_MEMCG_SWAP=y   <- withheld (see bisect note below)
 CONFIG_CGROUP_DEVICE=y  CONFIG_CGROUP_FREEZER=y  CONFIG_CGROUP_PIDS=y
 CONFIG_VETH=y  CONFIG_BRIDGE_NETFILTER=y
 ```
+
+**Bisect note:** the first commit carrying all of these (`f6613d1`) failed the
+kernel-build step, so this entry describes the *intended* set. The shipped
+order is cgroup-device/freezer/pids + veth + bridge-netfilter first; `MEMCG*`
+is re-added in a separate commit so a failure there is unambiguously its fault.
+Job logs need repo admin (403), so the split is the only way to attribute the
+break.
 
 - No `MEMCG` → dockerd exits with *"kernel does not support memory limit
   capabilities"*.

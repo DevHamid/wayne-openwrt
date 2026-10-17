@@ -155,8 +155,10 @@ CONFIG_USB_ACM=y
 # ("Your kernel does not support memory limit capabilities"), and containers
 # get no network without veth pairs. These are pure enablers: nothing above
 # changes existing boot behaviour.
-CONFIG_MEMCG=y
-CONFIG_MEMCG_SWAP=y
+# MEMCG deliberately withheld in this commit: run f6613d1 (which failed the
+# kernel build) without it to bisect. If this build is green, MEMCG is the
+# breaker and the vendor mm/ tree does not compile with it.
+# CONFIG_MEMCG is not set
 CONFIG_CGROUP_DEVICE=y
 CONFIG_CGROUP_FREEZER=y
 CONFIG_CGROUP_PIDS=y
