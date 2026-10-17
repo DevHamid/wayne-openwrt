@@ -11,7 +11,7 @@
 ```
 YOU ARE HERE
     ▼
-[M1✅][M2✅][M3✅][M4✅][M5✅][M6  ][M7? ][M8  ][M9★ ][FUT ]
+[M1✅][M2✅][M3✅][M4✅][M5✅][M6✅][M7? ][M8  ][M9★ ][FUT ]
  kernel  RAM   root  boot  SSH   host  dock? 21svc zip   mainline later
                                               = finish: OrangeFox-flashable ROM
 ```
@@ -25,12 +25,13 @@ YOU ARE HERE
 | M3 | Persistent rootfs on eMMC p64 (v0.9.4, 2026-10-14) | 100% |
 | M4 | Standalone boot, no PC (p58 flashed) | 100% |
 | M5 | USB gadget ethernet + serial → SSH (v0.9.6, 2026-10-15) | 95% |
+| M6 | USB OTG **host** mode — VBUS 5V + real device enumeration (2026-10-17) | 100% |
 
 - **M5:** ONE configfs gadget (`g1`) = ACM serial (`ttyGS0`↔`ttyACM0`) + RNDIS ethernet (`usb0`↔PC). DHCP + dropbear → `ssh root@192.168.42.1`. Dropbear duplicate-`Interface` bug fixed (normalize to single `usb0` each boot). *Closeout:* flash v0.9.6 installer-boot → zero-touch SSH; re-test on a good USB port (PC port 3-1.2 is a bad Acer hub, not the phone).
 
 ### 🔜 Next
 
-- **M6 — USB OTG host mode (pocket modem).** dwc3 as HOST: tethered phone USB → Wayne WAN → NAT. Single UDC = device XOR host; tear the gadget down cleanly; NEVER unbind dwc3 (panics this kernel).
+- **M6 — USB OTG host mode (pocket modem). ✅ CLOSED 2026-10-17.** dwc3 as HOST: tethered phone USB → Wayne WAN → NAT. **PROVEN:** PC unplugged → `reg75=enabled`, `extcon4 USB-HOST=1`, xHCI → hub (1a40:0801) → SanDisk Ultra (0781:5590) as `sda` with `sda1 sda2` FAT parsed + Logitech receiver as HID mouse. **ROOT CAUSE:** external VBUS (`VOLTAGE_NOW=5019531`) back-feeds the port; PM660 `BOOST_BACK_WA` (`wa_flags=0x72`) refuses to boost → `softstart TIMEOUT rc=-22` on all 4 currents. Unplug → first-try success. Kernel correct as-is (`mode_store` already sets `vbus_active=false` + ID-ground); v0.9.7 DT supply + v0.9.8 non-fatal were both required. **Rule: host mode is standalone-only** — PC console and source role cannot share the port. Remaining work is M6b (below), not the core. Historical investigation: Single UDC = device XOR host; tear the gadget down cleanly; NEVER unbind dwc3 (panics this kernel).
   - **Lever (found 2026-10-15):** `/sys/devices/platform/soc/a800000.ssusb/mode` = the role switch (`peripheral`|`host`). No `usb_role_switch` class on 4.19; extcon0..4 exist but are read-only notifications. PD phy extcon `USB=1` confirms cable presence.
   - **Test harness:** `scripts/m6-roleswitch.sh` — `status` (read-only), `host` (guarded flip + 60s auto-rollback), `hold` (300s window, continuous device logging; `HOLD_S=600` to extend), `peripheral` (manual early return). Must run **detached** (`>/dev/null 2>&1 &`) because the flip kills both SSH and the ttyGS0 console. Log → `/root/m6.log`.
   - **VBUS / OTG power investigation (2026-10-16):** host mode comes up (xHCI bus1+bus2) but with a real device seated on an OTG hub the port shows ZERO enumeration - dmesg never sees a plug event. Evidence: `extcon3 (qpnp-smb2): USB=0 USB-HOST=0` while host is up (charger never notified of host role) and `regulator.75 smb2-vbus state=disabled` (port not sourcing 5V). `scripts/vbus-probe.sh` flips to host, dumps extcon/regulator/power_supply state, attempts `smb2-vbus` enable, auto-rolls back. Log -> `/root/vbus.log`. HARDENED v2 (2026-10-16): a host-mode dump can HANG on a sysfs read (port electrically dead to PC, dwc3 mid-transition); v1 hung, never rolled back, UDC left empty -> BOTH ssh and ttyGS0 dead -> reboot required. v2 adds an INDEPENDENT watchdog that forces peripheral at T+25s even if the main body hangs, drops `find /sys`, and bounds every sysfs read with `timeout`. RULE: never touch the USB cable during a host-mode test. LATEST (2026-10-16): `regulator.75/state` is 0444 -> NOT writable from userspace, root or not; the enable path must be in-kernel. A writable gate `/sys/module/policy_engine/parameters/pd_vbus_ctrl` (rw; `echo 1` accepted 0->1) was tested with `scripts/vbus-host-test.sh` (pd_vbus_ctrl=1 + host flip, logs extcon3/extcon4/regulator.75/BOOST_CURRENT every 5s for 120s, watchdog rollback) -- RESULT: it changed NOTHING. For 120s in host mode `extcon3 (qpnp-smb2)` stayed USB=0/USB-HOST=0, `regulator.75 smb2-vbus` stayed disabled, BOOST_CURRENT=0, and only the two root hubs appeared (no downstream device). So pd_vbus_ctrl is NOT the lever. ROOT CAUSE FOUND (source-verified in DevHamid/LKGeek_sdm660@build-all-rekernel): `dwc3_otg_start_host()` (drivers/usb/dwc3/dwc3-msm.c) raises the OTG 5V boost ONLY through `devm_regulator_get_optional(dev, "vbus_dwc3")` and then `regulator_enable()`; the stock `ssusb@a800000` DT node (sdm660-common.dtsi) declares `USB3_GDSC-supply` + `dpdm-supply` but NO `vbus_dwc3-supply`, so get_optional returns NULL and enable is silently skipped -> smb2-vbus never rises -> nothing enumerates. Android hides this because its userspace USB HAL enables smb2-vbus itself; OpenWrt has no such HAL. STATUS (v0.9.7 on-device, 2026-10-16): the DT fix landed but host mode REGRESSED -- dmesg shows `unable to enable vbus_reg` then `unable to start host`, and usb_devs was EMPTY the whole run (v0.9.6 at least brought up the xHCI root hubs). Reason: with the supply now valid, regulator_enable() actually runs; when the charger refuses it, dwc3_otg_start_host() returned BEFORE dwc3_host_init() -> no xHCI at all. v0.9.8 fixes this two ways (patches/dwc3-vbus-nonfatal.sh + patches/charger-vbus-diag.sh): (1) a VBUS failure is now NON-FATAL -- log rc, continue -> host mode always comes up (as in v0.9.6) and we finally SEE the charger rc; (2) smb-lib.c compiled out ALL its error logging (#ifdef DEBUG; the Makefile never defines it) -> unconditional pr_err at every enable-path branch (ENTER / votable NULL / OTG_CFG write fail / boost softstart TIMEOUT / EXIT FAILED rc=N). The `M6 diag ...` dmesg lines from the next flash pinpoint the exact failure. Next: rebuild+flash, seat an OTG device, read the `M6 diag` line, confirm reg75=enabled and a `1-1:` device appears.
@@ -163,8 +164,18 @@ Version history lives in [CHANGELOG.md](CHANGELOG.md) and on the [Releases page]
 Vendor kernel already ships the display stack (`CONFIG_FB_MSM_MDSS=y`,
 `CONFIG_BACKLIGHT_QCOM_SPMI_WLED=y`). Userspace control:
 - panel: `/sys/class/graphics/fb0/blank` (0=on, 1=blank, 4=power-down). `fb1`/`fb2`
-  are MDSS **writeback** outputs, not the panel — use `fb0`.
-- backlight: `/sys/class/leds/lcd-backlight/brightness` (0..`max_brightness`=4095).
+  are MDSS **writeback** outputs, not the panel — use `fb0`. NOTE: on this vendor
+  kernel `fb0/blank` READS BACK EMPTY (4096 B, writable, show() is a stub) and
+  the bootloader runs `Continuous splash enabled`, so the DSI path is bootloader-
+  owned at handoff. Backlight is therefore the reliable actuator: brightness 0
+  is what actually darkens the panel.
+- backlight: **`/sys/class/backlight/backlight/brightness`** (type=raw,
+  0..`max_brightness`=4095). NOT `/sys/class/leds/lcd-backlight/` — that node
+  exists and accepts writes with clean readback, but it is a STUB: the panel
+  never changes. Found 2026-10-17 (screen stayed lit at brightness=0);
+  verified `/sys/class/backlight/backlight/` drives the real WLED string
+  (echo 0 -> dark, echo 4095 -> lit). `screen.sh` now auto-detects the first
+  writable `/sys/class/backlight/*` and only falls back to the LED path.
 - build-time auto-guard: `overlay-openwrt/etc/init.d/burnin-guard` (START=99) runs
   `screen.sh guard 90` at every boot, so the panel goes dark 90s after boot and
   STAYS dark (no more lit logo burning in). The build now installs
@@ -192,6 +203,10 @@ Vendor kernel already ships the display stack (`CONFIG_FB_MSM_MDSS=y`,
   `on` now drops a VETO flag (/tmp/.screen.on, tmpfs = cleared by reboot)
   that the guard honours, so a manual `on` STAYS on; `off`/`guard`/`stop`
   clear it.
+  v0.9.9: the guard DID run and DID set brightness 0, yet the panel stayed lit —
+  because it was writing the stub LED node. Backlight target corrected to
+  `/sys/class/backlight/*` (auto-detect); this is the actual fix for "screen
+  doesn't turn off automatically".
 - later (M8): a console on fb0 (`/dev/tty1` + `con2fbmap`) can show uptime / net /
   IP stats on the panel.
 

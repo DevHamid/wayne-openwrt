@@ -6,6 +6,61 @@ where each release also carries the built boot images as downloadable assets.
 
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [v0.9.9] — 2026-10-17 — M6 proven working + screen backlight node fixed
+
+### M6 — USB OTG host mode: WORKS (no kernel patch needed)
+
+Decisive test with the **PC unplugged** (external VBUS was the only blocker):
+
+```
+[16:53:20] pre: mode=host udc=a800000.dwc3
+[16:53:20] extcon4=USB=0 USB-HOST=1 DP=0
+[16:53:20] reg75=enabled TYPEC_MODE=Powered cable w/ sink
+[16:53:20] usb_devs=1-0:1.0 1-1 1-1.1 1-1.1:1.0 1-1.2 1-1.2:1.0 1-1:1.0 2-0:1.0 usb1 usb2
+```
+
+Real drivers bound downstream:
+
+```
+usb 1-1:   idVendor=1a40 idProduct=0801  "USB 2.0 Hub"        (4 ports)
+usb 1-1.1: idVendor=0781 idProduct=5590  SanDisk "Ultra"      + usb-storage -> scsi host0 -> sda1 sda2 (FAT parsed)
+usb 1-1.2: idVendor=046d idProduct=c542  Logitech Wireless Receiver -> USB HID Mouse input5
+```
+
+**Root cause, closed:** with the PC attached, `/sys/class/power_supply/usb`
+reports `VOLTAGE_NOW=5019531` — an external 5V is being driven *into* the port.
+The PM660 refuses to start its own boost under back-feeding, which is exactly
+what `wa_flags=0x72` (`BOOST_BACK_WA`) encodes; all four softstart currents
+returned `TIMEOUT rc=-22`. Unplugging the PC removes the back-feed and the same
+path softstarts first try.
+
+- The kernel was never wrong: `mode_store` already does the right thing
+  (`vbus_active=false` + `dwc3_id_start_peripheral`, `vbus_dwc3` supply wired
+  in v0.9.7). **No new driver patch.**
+- The v0.9.8 non-fatal patch is what kept this debuggable: on v0.9.7 the VBUS
+  refusal aborted before `dwc3_host_init()` and xHCI never appeared.
+- Operational rule: host mode is standalone-only. The PC (console) and the
+  phone's own source role cannot share the port — observe detached logs
+  (`/root/vbus.log` + `dmesg`) or use the serial console during host runs.
+- Clean teardown confirmed on PC replug: `Nothing attached`, `reg75=disabled`,
+  `usb_devs=` empty, xhci buses deregistered.
+
+### Screen: the guard ran but wrote a stub
+
+`screen.sh off` set `brightness 0` and the panel stayed lit. The guard was
+alive (`guardfg 90` pid 4398, armed) and doing its job — it was pointed at the
+wrong node.
+
+- `/sys/class/leds/lcd-backlight/brightness` — accepts writes, readback is
+  clean, **panel never changes** (stub).
+- `/sys/class/backlight/backlight/brightness` — `type=raw`, max 4095, verified
+  on-device: `0` = panel dark, `4095` = panel lit.
+- `/sys/class/graphics/fb0/blank` — exists (4096 B, writable) but reads back
+  EMPTY; with `Continuous splash enabled` the DSI path is bootloader-owned, so
+  backlight is the actuator to rely on.
+- `scripts/screen.sh` now auto-selects the first writable `/sys/class/backlight/*`
+  and falls back to the LED node only if none exists.
+
 ## [v0.9.8] — 2026-10-16 — M6 on-device follow-up (host regression) + screen guard under procd
 
 ### M6: v0.9.7 regression — host mode lost entirely

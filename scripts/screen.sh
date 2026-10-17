@@ -29,8 +29,22 @@
 # Detached-safe: `sh screen.sh guard 90 20 >/dev/null 2>&1 &`
 
 FB=/sys/class/graphics/fb0
-BL=/sys/class/leds/lcd-backlight/brightness
-MAXF=/sys/class/leds/lcd-backlight/max_brightness
+# BACKLIGHT NODE -- why this is not the LED: /sys/class/leds/lcd-backlight
+# EXISTS on wayne and accepts writes (readback 0/4095) but is a STUB: the panel
+# never changes. The node that actually drives the WLED string is the standard
+# backlight class device /sys/class/backlight/backlight (type=raw, max 4095).
+# Verified on-device 2026-10-17: echo 0 -> panel dark, echo 4095 -> panel lit.
+# Keep the LED path only as a fallback for kernels that expose it for real.
+BL=""
+MAXF=""
+for _d in /sys/class/backlight/*; do
+    [ -w "$_d/brightness" ] || continue
+    BL="$_d/brightness"; MAXF="$_d/max_brightness"; break
+done
+if [ -z "$BL" ]; then
+    BL=/sys/class/leds/lcd-backlight/brightness
+    MAXF=/sys/class/leds/lcd-backlight/max_brightness
+fi
 STATE=/root/.screen.bright
 PIDF=/root/.screen.pid
 VETO=/tmp/.screen.on
