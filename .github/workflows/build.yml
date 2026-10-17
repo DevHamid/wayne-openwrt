@@ -226,10 +226,23 @@ jobs:
             CC=clang CLANG_TRIPLE=aarch64-linux-gnu- LD=ld.lld \
             ${{ env.GCC_64 }} ${{ env.GCC_32 }} \
             vendor/wayne-oss-perf_defconfig
+          # Job logs are admin-only (403 for this account), so a failed build
+          # told us nothing but "exit code 2". Emit the actual compiler errors
+          # as check-run annotations -- that API IS readable -- so the break is
+          # diagnosable without repo admin.
+          set +e
           make -j$(nproc) O=out ARCH=arm64 \
             CC=clang CLANG_TRIPLE=aarch64-linux-gnu- LD=ld.lld \
             ${{ env.GCC_64 }} ${{ env.GCC_32 }} \
-            Image.gz-dtb dtbs
+            Image.gz-dtb dtbs > /tmp/kbuild.log 2>&1
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            grep -E "error:|Error [0-9]|undefined symbol|No rule to make" /tmp/kbuild.log \
+              | head -n 12 | while IFS= read -r line; do echo "::error::$line"; done
+            echo "--- tail ---"
+            tail -n 30 /tmp/kbuild.log
+            exit "$rc"
+          fi
           ls -lh out/arch/arm64/boot/Image.gz-dtb
           ls out/arch/arm64/boot/dts/vendor/qcom/ | grep -i wayne || echo "WARN: wayne dtb missing"
 
