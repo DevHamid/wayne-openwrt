@@ -176,3 +176,60 @@ CONFIG_BRIDGE=y
 # is a no-op and published-port DNAT across the bridge needs the userland proxy
 # (docker --userland-proxy=true, its default) to hold. Record it as a probe
 # limitation, do not re-add this symbol without porting br_netfilter.
+
+# --- WLAN (wlan0 never appears): make the icnss/QMI chain observable ---------
+# Verified on-device 2026-11-01 (ImmortalWrt v0.9.x, main @83c47f3):
+#   icnss: Platform driver probed successfully
+#   wlan: Loading driver v5.2.05.23C
+#   wlan_hdd_state wlan major(502) initialized
+#   ...then NOTHING. No "WLAN FW is ready", no icnss_qmi output at all.
+# That silence is not proof of health: DEBUG_FS is off, so every icnss_pr_dbg()
+# and icnss_qmi_pr_dbg() is compiled out. The suppressed messages are exactly
+# the ones that mark where the chain stops. Confirmed on-device:
+#   echo 'file icnss.c +p' > /sys/kernel/debug/dynamic_debug/control
+#   -> "can't create ... nonexistent directory"
+# Without these two symbols we are debugging blind, so enable them first.
+CONFIG_DEBUG_FS=y
+CONFIG_DYNAMIC_DEBUG=y
+
+# CONFIG_ICNSS_DEBUG is deliberately NOT set. drivers/soc/qcom/Kconfig:965
+# depends on DEBUG_FS and its help text says it enables BUG_ON on hardware
+# register access -- a hang risk on a device whose WLAN registers may already
+# be wedged. DYNAMIC_DEBUG gives us the prints without the BUG_ON.
+
+# --- WLAN: rmtfs_mem driver (candidate, NOT confirmed) -----------------------
+# The real failure is the QMI service locator timing out:
+#   servloc: init_service_locator: wait for locator service timed out
+#   servloc: pd_locator_work: Unable to connect to service locator!, rc = -62
+# rc=-62 is -ETIME from service-locator.c:283 (LOCATOR_SERVICE_TIMEOUT), not
+# ETIMEDOUT(110). With the locator dead, icnss_pd_restart_enable() ->
+# get_service_location("wlan","wlan/fw",...) fails (icnss.c:2012), the PDR
+# notifier is never registered, WLFW_SERVICE_ID_V01 is never seen, so
+# wlfw_new_server() never fires, ICNSS_FW_READY is never set, and
+# icnss_driver_event_register_driver() bails at icnss.c:1339 with
+# "FW is not ready yet". pld_snoc_probe never runs -> no wiphy -> no wlan0.
+# adsprpc's "PDR notifier locator for adsp is down" is the SAME locator failing
+# for a different consumer, which is why this is treated as a transport issue
+# rather than a WLAN bug.
+#
+# EXPECT THIS TO BE INSUFFICIENT ON ITS OWN. sdm660.dtsi:1579 already has a
+# rmtfs node, but it is wrong for this driver:
+#   qcom,rmtfs_sharedmem@0 {
+#           compatible = "qcom,sharedmem-uio";   <- binds msm_sharedmem.c:221
+#           reg = <0x0 0x200000>;                <- no base address
+#           qcom,client-id = <0x00000001>;       <- 1, correct for rmtfs
+#   }
+# It also sits in the soc block, not reserved-memory. So enabling
+# CONFIG_QCOM_RMTFS_MEM compiles a driver that has nothing to bind to.
+# A correct node needs compatible "qcom,rmtfs-mem", a real base+size reg, and
+# no-map, per arch/arm64/boot/dts/vendor/bindings/reserved-memory/
+# qcom,rmtfs-mem.txt. No SDM660 reference for that node exists in any local
+# tree (kc419 / wayne-v5 only carry msm8916 and msm8996 examples), so do NOT
+# invent a region blind -- find a genuinely free one first. Reserved memory
+# map for reference: wlan_msa 0x85700000+0x100000, smem 0x86000000+0x200000,
+# removed_regions 0x85800000+0x800000, removed_regions1 0x86200000+0x2d00000.
+CONFIG_QCOM_RMTFS_MEM=y
+
+# Unrelated, recorded so it is not re-investigated: "pil-q6v5-mss: No pas_id
+# found." is dev_info and non-fatal (pil-q6v5-mss.c:415-418 falls back to the
+# non-PAS path). Mainline sdm660.dtsi has no qcom,pas-id either. Red herring.
