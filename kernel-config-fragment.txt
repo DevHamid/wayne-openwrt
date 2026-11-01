@@ -178,18 +178,24 @@ CONFIG_BRIDGE=y
 # limitation, do not re-add this symbol without porting br_netfilter.
 
 # --- WLAN (wlan0 never appears): make the icnss/QMI chain observable ---------
-# Verified on-device 2026-11-01 (ImmortalWrt v0.9.x, main @83c47f3):
+# Verified on-device 2026-11-01 by scripts/wayne-diag.sh (246-line report):
 #   icnss: Platform driver probed successfully
 #   wlan: Loading driver v5.2.05.23C
 #   wlan_hdd_state wlan major(502) initialized
 #   ...then NOTHING. No "WLAN FW is ready", no icnss_qmi output at all.
-# That silence is not proof of health: DEBUG_FS is off, so every icnss_pr_dbg()
-# and icnss_qmi_pr_dbg() is compiled out. The suppressed messages are exactly
-# the ones that mark where the chain stops. Confirmed on-device:
-#   echo 'file icnss.c +p' > /sys/kernel/debug/dynamic_debug/control
-#   -> "can't create ... nonexistent directory"
-# Without these two symbols we are debugging blind, so enable them first.
-CONFIG_DEBUG_FS=y
+# That silence is not proof of health: DYNAMIC_DEBUG is off (default n,
+# lib/Kconfig.debug:81), so every icnss_pr_dbg()/icnss_qmi_pr_dbg() is
+# compiled out. The suppressed messages are exactly the ones that mark where
+# the chain stops.
+#
+# RETRACTED (was wrong, caught by that same report): "DEBUG_FS is off, we are
+# debugging blind" and the CONFIG_DEBUG_FS=y that followed from it. The running
+# kernel ALREADY has CONFIG_DEBUG_FS=y -- it is pulled in transitively by a
+# dependency (select DEBUG_FS in mm/Kconfig:692, kernel/trace/Kconfig:471,
+# net/sunrpc/Kconfig:40, drivers/md/bcache/Kconfig:23, drivers/edac/Kconfig:36),
+# and it is in NEITHER wayne defconfig. The earlier
+# "nonexistent directory" failure was an older v0.9.x build, not this one.
+# Do NOT add CONFIG_DEBUG_FS -- it is already on.
 CONFIG_DYNAMIC_DEBUG=y
 
 # CONFIG_ICNSS_DEBUG is deliberately NOT set. drivers/soc/qcom/Kconfig:965
@@ -201,16 +207,37 @@ CONFIG_DYNAMIC_DEBUG=y
 # The real failure is the QMI service locator timing out:
 #   servloc: init_service_locator: wait for locator service timed out
 #   servloc: pd_locator_work: Unable to connect to service locator!, rc = -62
-# rc=-62 is -ETIME from service-locator.c:283 (LOCATOR_SERVICE_TIMEOUT), not
-# ETIMEDOUT(110). With the locator dead, icnss_pd_restart_enable() ->
-# get_service_location("wlan","wlan/fw",...) fails (icnss.c:2012), the PDR
-# notifier is never registered, WLFW_SERVICE_ID_V01 is never seen, so
-# wlfw_new_server() never fires, ICNSS_FW_READY is never set, and
-# icnss_driver_event_register_driver() bails at icnss.c:1339 with
-# "FW is not ready yet". pld_snoc_probe never runs -> no wiphy -> no wlan0.
+# rc=-62 is -ETIME from service-locator.c:283 (LOCATOR_SERVICE_TIMEOUT=300000ms
+# = 300s), NOT ETIMEDOUT(110). The timeout printed at t=313.65s = 300s plus
+# ~13s of boot before the workqueue was scheduled, so it ran the full course
+# and the remote never answered once.
+# With the locator dead: icnss_pd_restart_enable() ->
+# get_service_location("wlan","wlan/fw",...) fails (icnss.c:2012) -> no PDR
+# notifier -> WLFW_SERVICE_ID_V01 never seen -> wlfw_new_server() never fires
+# -> ICNSS_FW_READY never set -> icnss_driver_event_register_driver() bails
+# (icnss.c:1339, "FW is not ready yet") -> pld_snoc_probe never runs ->
+# no wiphy -> no wlan0.
 # adsprpc's "PDR notifier locator for adsp is down" is the SAME locator failing
-# for a different consumer, which is why this is treated as a transport issue
-# rather than a WLAN bug.
+# for a different consumer, so this is transport-wide, not a WLAN bug.
+#
+# RETRACTED: "the icnss2 driver can fix this via SKIP_QMI." The wayne-diag
+# report shows icnss2 is ABSENT from the running kernel, and
+# drivers/soc/qcom/Makefile:106 gates it on CONFIG_ICNSS2, which is not set in
+# either defconfig. Meanwhile icnss2/main.c:3533 also matches "qcom,icnss",
+# the same compatible as the bound icnss node -- so enabling ICNSS2 would race
+# the currently-probing ICNSS for the same DT node. Not a safe swap on
+# speculation; do not propose it again without a tested reference.
+#
+# RETRACTED: "no subsys-pil-tz line for modem is an asymmetry worth chasing."
+# subsys-pil-tz.c:1090 takes its subsys name from qcom,firmware-name, and only
+# the TZ-based nodes (venus/adsp/cdsp/kgsl) use that driver at all. The modem
+# uses a DIFFERENT driver, pil-q6v5-mss (compatible "qcom,pil-q6v55-mss"), so
+# its absence from that list is expected and means nothing.
+#
+# REMAINING OPEN (kernel side is exonerated): nothing in this tree ever calls
+# subsys_boot(); on Android userspace triggers the Q6 bring-up. The kernel is
+# doing its job. Also note /lib/firmware/ was EMPTY on-device -- the M8
+# firmware staging did not persist, a second independent problem.
 #
 # EXPECT THIS TO BE INSUFFICIENT ON ITS OWN. sdm660.dtsi:1579 already has a
 # rmtfs node, but it is wrong for this driver:
