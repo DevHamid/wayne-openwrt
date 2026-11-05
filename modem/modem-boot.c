@@ -13,6 +13,13 @@
  *   so subsystem_get("modem") runs the MBA + modem boot end to end. The whole
  *   PIL stack and subsystem_restart are built-in (=y) on this branch.
  *
+ *   Inside pil_boot() the MBA image is loaded by pil-msa.c:656-670, which
+ *   requests "mba.mbn" (or "mba.b00" for non-elf images). The DT node
+ *   carries qcom,sequential-fw-load, so the modem image follows as
+ *   modem.mdt + modem.bNN (peripheral-loader.c "%s.mdt" / "%s.b%02d").
+ *   mba.mbn is requested under a fixed name - fwname below does not
+ *   affect it; wire /lib/firmware/mba.mbn separately (see modem/rmtfs).
+ *
  *   Do NOT call pil_mss_reset_load_mba() from this module: pil-q6v5-mss.c
  *   exports nothing (insmod would die with "Unknown symbol") and that
  *   function is the ramdump path only (pil-q6v5-mss.c:198, inside
@@ -20,10 +27,17 @@
  *   could never load.
  *
  * sysfs: /sys/class/modem-boot/modem0/
- *   state    ro : "online" / "offline" (last err %d)
+ *   state    ro : "online" / "offline (last err %d)". Diagnostics:
+ *                 -22 = PIL rejected the firmware (missing/wrong name),
+ *                 -6/-12 = MBA load path, "offline" with no err after a
+ *                 boot write = err-ready timeout, usually rmtfs not
+ *                 answering.
  *   boot     wo : write "1" -> subsystem_get("modem"). Idempotent; an
  *                 already-online subsys just takes a refcount.
- *   restart  wo : write "1" -> subsystem_restart("modem") (SSR recovery)
+ *   restart  wo : write "1" -> subsystem_restart("modem") - SSR recovery
+ *                 ONLY. __subsystem_restart_dev() requires SUBSYS_ONLINE
+ *                 and WARNs otherwise, so this is NOT a cold-boot
+ *                 substitute; use boot for that.
  *   fwname   rw : firmware basename, honored before the FIRST boot only.
  *                 Default "modem" -> loader requests modem.mdt + modem.bNN
  *                 (peripheral-loader.c: "%s.mdt" and "%s.b%02d").

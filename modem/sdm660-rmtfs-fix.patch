@@ -1,0 +1,50 @@
+Fix the rmtfs shared-memory node so it can actually bind.
+
+sdm660.dtsi:1579 declares the rmtfs region with a ZERO base address:
+
+    qcom,rmtfs_sharedmem@0 {
+            compatible = "qcom,sharedmem-uio";
+            reg = <0x0 0x200000>;
+            reg-names = "rmtfs";
+            qcom,client-id = <0x00000001>;
+            qcom,guard-memory;
+    };
+
+drivers/uio/msm_sharedmem/msm_sharedmem.c:153 rejects that outright:
+
+    if (shared_mem_pyhsical == 0) {
+            pr_err("Shared memory base is zero\n");
+            return -EINVAL;
+    }
+
+so the node never probes and /dev/uio* never appears.  rmtfs then has
+nothing to serve the modem's RFSA file requests from, and the modem dies
+right after the MBA hand-off.
+
+Address chosen from the verified free gap in the reserved-memory map:
+
+    0x85700000 +0x100000 -> 0x85800000   wlan_msa_mem
+    0x85800000 +0x800000 -> 0x86000000   removed_regions
+    0x86000000 +0x200000 -> 0x86200000   smem_mem
+    0x86200000 +0x2d00000 -> 0x88f00000   removed_regions1
+    <<< FREE: 0x88f00000 .. 0x8ac00000 = 29 MB >>>
+    0x8ac00000 +0x7e00000 -> 0x92a00000   modem_fw_mem
+
+0x88f00000 is 2 MB-aligned and 4 KB-aligned (guard-memory adds SZ_4K at
+each end, msm_sharedmem.c:167).  It does not overlap any reserved region
+and does not reach into modem_fw_mem.
+
+--- a/arch/arm64/boot/dts/vendor/qcom/sdm660.dtsi
++++ b/arch/arm64/boot/dts/vendor/qcom/sdm660.dtsi
+@@ -1576,9 +1576,9 @@
+ 		};
+ 	};
+ 
+-	qcom,rmtfs_sharedmem@0 {
++	qcom,rmtfs_sharedmem@88f00000 {
+ 		compatible = "qcom,sharedmem-uio";
+-		reg = <0x0 0x200000>;
++		reg = <0x0 0x88f00000 0x0 0x200000>;
+ 		reg-names = "rmtfs";
+ 		qcom,client-id = <0x00000001>;
+ 		qcom,guard-memory;

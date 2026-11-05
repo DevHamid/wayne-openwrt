@@ -14,21 +14,21 @@
 # Booting the modem before rmtfs answers: MBA hands off, then the modem
 # watchdogs itself. Looks like a firmware fault; it is a sequencing fault.
 #
-# Firmware wiring: drivers/soc/qcom/peripheral-loader.c requests
-# "<fw>.mdt" then "<fw>.b%02d" (lowercase) via the firmware loader, i.e.
-# /lib/firmware/modem.mdt + modem.b00..bNN. Android ships uppercase
-# MODEM.MDT / MODEM.bNN, so this script exposes lowercase names pointing
-# at the read-only mount.
+# Firmware wiring: the kernel loader requests three things by lowercase
+# name: mba.mbn (pil-msa.c:656-670; mba.b00 for non-elf images),
+# modem.mdt + modem.bNN (peripheral-loader.c "%s.mdt" / "%s.b%02d").
+# Android ships MBA.MBN / MODEM.MDT / MODEM.B* uppercase on the modem
+# partition, so this script exposes lowercase names in /lib/firmware
+# pointing at the read-only mount.
 
 START=95
 
-MODEM_PART="/dev/block/by-name/modem"
 FIRMWARE_DIR="/mnt/modem"
+MODEM_PART=""
 RMTFS_BIN="/usr/bin/rmtfs"
-# Qualcomm rmtfs userspace takes the uio device node serving the rmtfs
-# sharedmem region. Verify the argument format against your rmtfs build
-# and adjust RMTFS_ARGS if it needs flags (e.g. verbose).
-RMTFS_ARGS=""
+# Flags reported against a real rmtfs build: -d daemonize, -P skip the
+# setup script. Verify against your rmtfs source; drop if it differs.
+RMTFS_ARGS="-d -P"
 
 log() {
 	logger -t rmtfs "$@"
@@ -46,20 +46,33 @@ find_uio() {
 	return 1
 }
 
+find_modem_part() {
+	local c
+	for c in /dev/block/by-name/modem \
+		 /dev/block/bootdevice/by-name/modem \
+		 /dev/block/platform/*/by-name/modem; do
+		[ -b "$c" ] && { echo "$c"; return 0; }
+	done
+	return 1
+}
+
 mount_firmware() {
 	mkdir -p "$FIRMWARE_DIR"
-	if mount | grep -q " on $FIRMWARE_DIR "; then
+	mount | grep -q " on $FIRMWARE_DIR " && return 0
+	MODEM_PART=$(find_modem_part) || true
+	if [ -n "$MODEM_PART" ] && mount -o ro "$MODEM_PART" "$FIRMWARE_DIR"; then
 		return 0
 	fi
-	if mount -o ro "$MODEM_PART" "$FIRMWARE_DIR"; then
-		return 0
-	fi
-	log "mount $MODEM_PART -> $FIRMWARE_DIR failed"
+	log "no modem firmware partition mounted (tried by-name/modem variants)"
 	return 1
 }
 
 wire_firmware() {
 	local src f base
+	mkdir -p /lib/firmware
+	for src in $(find "$FIRMWARE_DIR" -maxdepth 1 \( -iname 'mba.mbn' -o -iname 'mba.b00' \)); do
+		ln -sf "$src" "/lib/firmware/$(basename "$src" | tr 'A-Z' 'a-z')"
+	done
 	src=$(find "$FIRMWARE_DIR" -maxdepth 1 -iname 'modem.mdt' | head -n1)
 	if [ -z "$src" ]; then
 		log "modem.mdt not found on $FIRMWARE_DIR - is the firmware partition mounted?"

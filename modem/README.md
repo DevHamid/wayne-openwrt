@@ -1,18 +1,57 @@
 # wayne modem bring-up
 
-Mi 6X (wayne, sdm660) on OpenWrt/ImmortalWrt as a pocket modem. These three
-files are the modem boot path, recreated 2026-11-05 after the originals were
-lost with `/srv/ssd` (the old local server). Everything below is verified
-against `DevHamid/LKGeek_sdm660 @ fix-ksu-sugrant` (4.19), which is what
-`.github/workflows/build.yml` now clones.
+Mi 6X (wayne, sdm660) on OpenWrt/ImmortalWrt as a pocket modem. The three
+files in this directory are the modem boot path, recreated 2026-11-05 after
+the originals were lost with `/srv/ssd` (the old local server), then
+cross-checked against the recovered originals. Everything below is verified
+against `DevHamid/LKGeek_sdm660 @ fix-ksu-sugrant` (head adbaae8f6), which
+is what `.github/workflows/build.yml` clones.
+
+## Transport: QMI over QRTR. Not MBIM.
+
+| Plane | What actually carries it | Kernel / DT |
+|---|---|---|
+| Control | QMI over **QRTR** (glink `IPCRTR` channel) | `CONFIG_QRTR=y`, `CONFIG_QRTR_SMD=y`, `qcom,modem_qrtr` node in `sdm660.dtsi` |
+| Data | **rmnet**, hardware-offloaded to IPA | `CONFIG_RMNET=y`, `CONFIG_RMNET_IPA=y`, `qcom,rmnet-ipa` node |
+
+MBIM is a USB framing protocol (CDC-MBIM). The wayne modem firmware does
+not speak MBIM over QRTR, and there is no MBIM function driver in this
+tree. MBIM would only appear if you tethered the *phone* to a PC as a USB
+modem — and even then it is a userspace bridge over the same QMI WDS
+calls, not a second modem protocol.
+
+**Consequence for OpenWrt:** `uqmi` will *not* work here — it only talks to
+`/dev/cdc-wdmX` (QMI-over-USB). You need `libqmi` built with QRTR transport
+plus `qmi-proxy`, or postmarketOS-style `qrtr-ns` + a small `qmicli`
+bring-up script that hands the resulting `rmnet_data0` to netifd.
 
 ## Files
 
 | File | Role |
 |---|---|
 | `modem-boot.c` | kernel module; drives `subsystem_get("modem")`, exposes sysfs |
-| `rmtfs` | procd init script; mounts firmware partition, starts rmtfs daemon |
+| `rmtfs` | procd init script; mounts firmware partition, wires `/lib/firmware`, starts rmtfs daemon |
 | `README.md` | this doc |
+
+## What is already in place (kernel side)
+
+- `pil_modem: qcom,mss@4080000` — `compatible = "qcom,pil-q6v55-mss"`
+  (matched at `pil-q6v5-mss.c:522`), `qcom,firmware-name = "modem"`,
+  `qcom,sequential-fw-load`, `qcom,pil-self-auth`, `status = "ok"`, plus
+  the `qcom,mba-mem@0` child (matched at `:508`).
+- Reserved memory: `modem_fw_region` (~126 MB), `pil_mba_region` (2 MB).
+- Defconfig: `MSM_PIL_MSS_QDSP6V5=y`, `MSM_PIL=y`, `MSM_SUBSYSTEM_RESTART=y`,
+  `MSM_PIL_SSR_GENERIC=y`, `QCOM_SMEM=y`, `RPMSG_QCOM_SMD=y`,
+  `RPMSG_QCOM_GLINK_SMEM=y`, `QCOM_GLINK=y`, `QRTR=y`, `QRTR_SMD=y`,
+  `QCOM_QMI_HELPERS=y`, `RMNET=y`, `RMNET_IPA=y`, `UIO_MSM_SHAREDMEM=y`.
+- No wayne overlay touches `pil_modem` — nothing disables it.
+- The rmtfs sharedmem node binds **as-is** (see DT patch below).
+
+**The firmware payload is gone.** It used to live at
+`/srv/ssd/vendor-work/modem-firmware/` (325 files, 91.58 MB); that disk is
+lost and the remounted `/srv/ssd` is empty. Re-extract from the phone's
+modem partition (device-side: `dd` the partition, loop-mount the VFAT) and
+push the files into this repo — git survives, costs zero local storage.
 
 ## How the modem actually boots on this branch
 
@@ -22,47 +61,82 @@ against `DevHamid/LKGeek_sdm660 @ fix-ksu-sugrant` (4.19), which is what
 whole MBA+modem boot. The entire PIL stack and `subsystem_restart` are
 built-in (`=y`).
 
-`pil-q6v5-mss.c` exports nothing. The old design called
-`pil_mss_reset_load_mba()` from a module — that function is unexported
-(insmod would fail with `Unknown symbol`) and is the ramdump path only
-(line 198, inside `modem_ramdump()`). `modem-boot.c` no longer touches it.
+```
+subsystem_get("modem")     subsystem_restart.c
+  -> modem_powerup()       pil-q6v5-mss.c:146
+  -> pil_boot()            pil-q6v5.c
+     -> pbl_mba_boot()     pil-msa.c:656-670
+        request_firmware("mba.mbn")   (or "mba.b00" for non-elf images)
+     -> request_firmware("modem.mdt")  peripheral-loader.c:1252 ("%s.mdt")
+     -> request_firmware("modem.bNN")  peripheral-loader.c:1024 ("%s.b%02d")
+  -> wait_for_err_ready()  modem signals ready over smp2p
+```
 
-The rmtfs sharedmem node needs **no DTS patch** on this branch: both live
-branches' `msm_sharedmem.c` are byte-identical and take the dynamic-alloc
-path (`reg = <0x0 0x200000>` → `dma_alloc_coherent`, SZ_4K guards). The
-node binds as-is.
+Two traps this settles:
+
+1. `pil_mss_reset_load_mba()` is **not** the boot function. Its only call
+   site is `pil-q6v5-mss.c:198`, inside `modem_ramdump()` — the ramdump
+   path. The MBA load during boot happens in `pil-msa.c` via
+   `pbl_mba_boot()`. The old design called `pil_mss_reset_load_mba()` from
+   a module — unexported (insmod would fail with `Unknown symbol`) and
+   semantically wrong. `modem-boot.c` no longer touches it.
+2. `subsystem_restart("modem")` is **not** a cold-boot substitute:
+   `__subsystem_restart_dev()` requires `SUBSYS_ONLINE` and WARNs
+   otherwise. It is for SSR recovery only. Use the `boot` attribute for a
+   cold boot.
+
+## DT patch: not needed on `fix-ksu-sugrant`
+
+An earlier round of bring-up notes (and the supplied
+`sdm660-rmtfs-fix.patch`, which moves `reg` to `<0x0 0x88f00000>`) assumed
+`drivers/uio/msm_sharedmem/msm_sharedmem.c:153` rejects a zero base with
+`-EINVAL`. **The current driver does not.** On `fix-ksu-sugrant` @
+adbaae8f6 the same line takes the dynamic-allocation path
+(`is_addr_dynamic = true` → `dma_alloc_coherent`, SZ_4K guards), and the
+rejection text ("Shared memory base is zero") does not exist anywhere in
+the file. So `reg = <0x0 0x200000>` binds fine, `/dev/uio*` appears, and
+no DTS change is required.
+
+**Fallback only:** if `/dev/uio*` never shows up at runtime (the
+`dma_alloc_coherent` failing is the one plausible cause), apply
+`sdm660-rmtfs-fix.patch` then — it moves the region into the verified free
+gap `0x88f00000..0x8ac00000`, 2 MB-aligned so the guard pages fit.
 
 ## Boot order (never swap 3 and 4)
 
 1. Kernel up; `/dev/uio*` present
-2. `rmtfs` init script mounts the firmware partition read-only at `/mnt/modem`
+2. `rmtfs` init script (`START=95`) mounts the firmware partition
+   read-only and wires `/lib/firmware`
 3. `rmtfs` daemon answering remote-FS requests
-4. Modem boot: `echo 1 > /sys/class/modem-boot/modem0/boot`
+4. Modem boot: `echo 1 > /sys/class/modem-boot/modem0/boot` (rc.local or
+   init.d at `START=97+`)
 
 Boot the modem before rmtfs answers and you get the MBA hand-off followed
 by a watchdog bite. That looks like a firmware fault and isn't one.
 
 ## Firmware file wiring
 
-`peripheral-loader.c` requests `"<fw>.mdt"` then `"<fw>.b%02d"` through the
-firmware loader — lowercase, resolved under `/lib/firmware/`. Android ships
-uppercase `MODEM.MDT` / `MODEM.bNN`. Two ways to bridge, pick one:
+The kernel loader requests **lowercase** `mba.mbn`, `modem.mdt` and
+`modem.bNN` through the firmware loader, resolved under `/lib/firmware/`.
+Android ships `MBA.MBN` / `MODEM.MDT` / `MODEM.B*` uppercase on the
+partition. The `rmtfs` script bridges the case gap with symlinks
+(`/lib/firmware/modem.mdt` → `/mnt/modem/MODEM.MDT`, same for `mba.mbn`
+and every `modem.bNN`). Nothing else to do — `mba.mbn` is wired too,
+because `pil-msa.c` requests it under a fixed name.
 
-- **Default (symlinks):** the `rmtfs` script creates
-  `/lib/firmware/modem.mdt` → `/mnt/modem/MODEM.MDT` and lowercase
-  `modem.bNN` symlinks. Nothing else to do.
-- **Set the basename instead:** before the first boot,
-  `echo MODEM > /sys/class/modem-boot/modem0/fwname` (basename only, no
-  extension — PIL appends `.mdt` / `.bNN` itself). Fails with `EBUSY`
-  after the modem is already up, because `modem_powerup()` copies the
-  name into the PIL descriptor at powerup time.
+**Alternative:** before the first boot,
+`echo MODEM > /sys/class/modem-boot/modem0/fwname` (basename only, no
+extension — PIL appends `.mdt` / `.bNN` itself). Fails with `EBUSY` after
+the modem is already up, because `modem_powerup()` copies the name into
+the PIL descriptor at powerup time. Note this does not affect `mba.mbn`,
+which is always requested under that fixed name.
 
 ## sysfs interface
 
 ```
 /sys/class/modem-boot/modem0/state      ro   online | offline (last err %d)
 /sys/class/modem-boot/modem0/boot       wo   write 1 -> subsystem_get (idempotent)
-/sys/class/modem-boot/modem0/restart    wo   write 1 -> subsystem_restart (SSR)
+/sys/class/modem-boot/modem0/restart    wo   write 1 -> subsystem_restart (SSR only)
 /sys/class/modem-boot/modem0/fwname     rw   firmware basename, first boot only
 ```
 
@@ -76,35 +150,32 @@ echo 1 > /sys/class/modem-boot/modem0/boot
 cat /sys/class/modem-boot/modem0/state          # online
 ```
 
-A failed boot write never panics the box — the error code lands in `state`.
-The module deliberately does not boot the modem at init, so rmtfs gets its
-chance first.
+A failed boot write never panics the box — the error code lands in
+`state`. The module deliberately does not boot the modem at init, so
+rmtfs gets its chance first.
 
-## Transport
+## Diagnostics, in order
 
-QMI over QRTR (glink IPCRTR; `qcom,modem_qrtr` node in `sdm660.dtsi`); data
-plane via rmnet + IPA. `uqmi` is unusable here — it needs `/dev/cdc-wdmX`.
-Use libqmi built with QRTR transport plus `qmi-proxy`, or `qrtr-ns` +
-`qmicli`.
-
-## Diagnostics
-
-```sh
-dmesg | grep -iE 'sharedmem|uio|rmtfs|pil|modem|qrtr'
-ls -l /dev/uio*                                  # rmtfs sharedmem node
-cat /sys/class/uio/uio*/name                     # expect 'rmtfs'
-cat /sys/class/modem-boot/modem0/state
-/etc/init.d/rmtfs status
-```
+1. `ls /sys/class/uio/` and `cat /sys/class/uio/uio*/name` — is there a
+   `rmtfs` device? If not, the sharedmem driver failed; see DT patch
+   (fallback), then `dmesg | grep -i sharedmem`.
+2. `cat /sys/class/modem-boot/modem0/state` — `-22` means the PIL
+   rejected the firmware (check `/lib/firmware/modem.mdt` wiring),
+   `-6`/`-12` means the MBA load path (check `mba.mbn`), a boot write that
+   leaves no error but never reaches `online` means
+   `wait_for_err_ready()` timed out — almost always rmtfs not answering.
+3. `dmesg | grep -iE "sharedmem|uio|rmtfs|pil|modem|qrtr"`.
 
 `pil-q6v5-mss: No pas_id found.` is `dev_info`, non-fatal — the driver
 falls back to the non-PAS path. Don't chase it.
 
 ## Build
 
-Cross-compile against the kernel tree the CI produces (fix-ksu-sugrant,
+Cross-compile against the kernel tree the CI produces (`fix-ksu-sugrant`,
 4.19). The module needs `CONFIG_QCOM_PIL`, the subsystem stack, and
 `CONFIG_UIO_MSM_SHAREDMEM` — all `=y` in `wayne-oss-perf_defconfig`.
+Out-of-tree against this tree: `#include <soc/qcom/subsystem_restart.h>`
+resolves (in-tree drivers use the same form).
 
 ## On-device safety
 
@@ -113,3 +184,5 @@ Cross-compile against the kernel tree the CI produces (fix-ksu-sugrant,
 - Have a known-good boot image + OrangeFox recovery installed before
   flashing anything. Restore path: flash the backup boot image from
   recovery, reboot, done.
+- The firmware partition is mounted read-only; nothing on the phone is
+  written by this flow.
