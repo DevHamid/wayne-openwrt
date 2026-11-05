@@ -1,0 +1,111 @@
+#!/bin/sh /etc/rc.common
+# rmtfs - firmware wiring + rmtfs daemon for the wayne (Mi 6X / sdm660) modem
+#
+# Boot order (NEVER swap steps 3 and 4):
+#   1. kernel up; /dev/uio* present. On fix-ksu-sugrant the
+#      qcom,sharedmem-uio node binds reg=<0x0 0x200000> dynamically
+#      (msm_sharedmem.c takes the dma_alloc_coherent path) - no DTS patch.
+#   2. this script mounts the modem firmware partition (VFAT) read-only.
+#   3. this script starts rmtfs so it answers the modem's remote-FS
+#      requests.
+#   4. ONLY THEN boot the modem:
+#        echo 1 > /sys/class/modem-boot/modem0/boot
+#      Put that trigger in /etc/rc.local, or another init.d at START=97+.
+# Booting the modem before rmtfs answers: MBA hands off, then the modem
+# watchdogs itself. Looks like a firmware fault; it is a sequencing fault.
+#
+# Firmware wiring: drivers/soc/qcom/peripheral-loader.c requests
+# "<fw>.mdt" then "<fw>.b%02d" (lowercase) via the firmware loader, i.e.
+# /lib/firmware/modem.mdt + modem.b00..bNN. Android ships uppercase
+# MODEM.MDT / MODEM.bNN, so this script exposes lowercase names pointing
+# at the read-only mount.
+
+START=95
+
+MODEM_PART="/dev/block/by-name/modem"
+FIRMWARE_DIR="/mnt/modem"
+RMTFS_BIN="/usr/bin/rmtfs"
+# Qualcomm rmtfs userspace takes the uio device node serving the rmtfs
+# sharedmem region. Verify the argument format against your rmtfs build
+# and adjust RMTFS_ARGS if it needs flags (e.g. verbose).
+RMTFS_ARGS=""
+
+log() {
+	logger -t rmtfs "$@"
+}
+
+find_uio() {
+	local uio
+	for uio in /sys/class/uio/uio*; do
+		[ -e "$uio/name" ] || continue
+		if grep -q "rmtfs" "$uio/name" 2>/dev/null; then
+			echo "/dev/${uio##*/}"
+			return 0
+		fi
+	done
+	return 1
+}
+
+mount_firmware() {
+	mkdir -p "$FIRMWARE_DIR"
+	if mount | grep -q " on $FIRMWARE_DIR "; then
+		return 0
+	fi
+	if mount -o ro "$MODEM_PART" "$FIRMWARE_DIR"; then
+		return 0
+	fi
+	log "mount $MODEM_PART -> $FIRMWARE_DIR failed"
+	return 1
+}
+
+wire_firmware() {
+	local src f base
+	src=$(find "$FIRMWARE_DIR" -maxdepth 1 -iname 'modem.mdt' | head -n1)
+	if [ -z "$src" ]; then
+		log "modem.mdt not found on $FIRMWARE_DIR - is the firmware partition mounted?"
+		return 1
+	fi
+	ln -sf "$src" /lib/firmware/modem.mdt
+	for f in $(find "$FIRMWARE_DIR" -maxdepth 1 -iname 'modem.b[0-9][0-9]'); do
+		base=${f##*/}
+		ln -sf "$f" "/lib/firmware/$(echo "$base" | tr 'A-Z' 'a-z')"
+	done
+}
+
+start() {
+	local uio
+
+	mount_firmware || return 1
+	wire_firmware || return 1
+
+	uio=$(find_uio)
+	if [ -z "$uio" ]; then
+		log "no rmtfs uio device found (expected name 'rmtfs' under /sys/class/uio/uio*/name)"
+		return 1
+	fi
+	if [ ! -x "$RMTFS_BIN" ]; then
+		log "$RMTFS_BIN not installed - build the Qualcomm rmtfs userspace"
+		return 1
+	fi
+
+	procd_open_instance
+	procd_set_param command "$RMTFS_BIN" $RMTFS_ARGS "$uio"
+	procd_set_param respawn
+	procd_close_instance
+
+	log "rmtfs started on $uio; firmware wired from $FIRMWARE_DIR"
+}
+
+stop() {
+	# procd tears down instances; drop the firmware mount on shutdown
+	umount "$FIRMWARE_DIR" 2>/dev/null
+}
+
+status() {
+	local uio
+	uio=$(find_uio)
+	echo "rmtfs uio: ${uio:-none}"
+	mount | grep " on $FIRMWARE_DIR " || echo "firmware not mounted"
+	ls -l /lib/firmware/modem.mdt 2>/dev/null || echo "modem.mdt not wired"
+	cat /sys/class/modem-boot/modem0/state 2>/dev/null || echo "modem-boot module not loaded"
+}
