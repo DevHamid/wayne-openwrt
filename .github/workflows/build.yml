@@ -148,7 +148,7 @@ jobs:
         run: |
           git clone --recurse-submodules --depth=1 \
             https://github.com/DevHamid/LKGeek_sdm660.git \
-            -b build-all-rekernel kernel
+            -b fix-ksu-sugrant kernel
           # drivers/kernelsu is a SYMLINK into the KernelSU submodule; a broken
           # symlink makes drivers/Kconfig:242 fail with "can't open file".
           test -f kernel/drivers/kernelsu/Kconfig \

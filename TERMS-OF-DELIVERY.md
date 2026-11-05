@@ -25,7 +25,7 @@ Checksums provided inside the ZIP match the artifacts once built by CI. Do not u
 
 ## Limits / assumptions
 - Wayne only (A-only partition layout). Not tested on A/B devices like Mi A2/jasmine.
-- Requires LKGeek_sdm660 branch build-all-rekernel (4.19.x) as the kernel tree.
+- Requires LKGeek_sdm660 branch fix-ksu-sugrant (4.19.x) as the kernel tree.
 - Workflow downloads donor boot.img from Kernel_Action; it uses that header format.
 - CPIO tool is used both in workflow and tests; both busybox and GNU cpio validated.
 
