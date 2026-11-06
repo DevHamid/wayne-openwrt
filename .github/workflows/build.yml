@@ -24,13 +24,14 @@ jobs:
             libelf-dev lz4 ccache
 
       # ---- Toolchain: EXACT same combo as DevHamid/Kernel_Action (proven) ----
-      - name: Download AOSP clang (r547379)
+      - name: Download ZyCromerZ custom clang 16.0.6 (safe for 4.19)
         run: |
           mkdir -p tc/clang-aosp
           wget -q -O clang.tar.gz \
-            "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master/clang-r547379.tar.gz"
+            "https://github.com/ZyCromerZ/Clang/releases/download/16.0.6-20260807-release/Clang-16.0.6-20260807.tar.gz"
           tar -C tc/clang-aosp -xzf clang.tar.gz
           ls tc/clang-aosp/bin/ | head -5
+          ls tc/clang-aosp/aarch64-linux-gnu/bin/ | head -3
 
       - name: Download AOSP gcc (android-12.1.0_r27) — EXACT Ka_build.yml recipe
         run: |
