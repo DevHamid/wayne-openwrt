@@ -465,6 +465,11 @@ jobs:
           # no ttyGS0 line, so without this the acm serial console never spawns
           # a login (picocom opens the port but gets no prompt).
           echo 'ttyGS0::askfirst:/usr/libexec/login.sh' >> etc/inittab
+          # 23.05 dropbear config ships 'option Interface lan'. On 23.05 this
+          # interface filter binds nowhere (bridge state/name differs) -> port
+          # 22 refused even though usb0 is up and DHCP works. Drop the filter
+          # so dropbear listens on all interfaces.
+          sed -i "/option Interface/d" etc/config/dropbear
           cp ../../overlay-openwrt/init init
           chmod +x init
           cp ../../overlay-common/usb-gadget.sh usb-gadget.sh
