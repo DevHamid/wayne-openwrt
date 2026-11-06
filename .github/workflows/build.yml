@@ -453,6 +453,18 @@ jobs:
           # A 23.05 rootfs is NOT 21.02: the preinit/procd layout differs.
           tar tzf rootfs/openwrt-rootfs.tar.gz | grep -E '^(\./)?(init|sbin/procd|etc/preinit)$' | sort
 
+      - name: Download busybox-static (aarch64) for 23.05 /init shebang
+        run: |
+          set -euo pipefail
+          mkdir -p tc
+          wget -q \
+            https://dl-cdn.alpinelinux.org/alpine/v3.22/main/aarch64/busybox-static-1.37.0-r20.apk \
+            -O tc/busybox.apk
+          tar -xzf tc/busybox.apk -C tc bin/busybox.static
+          mv tc/bin/busybox.static tc/busybox
+          chmod +x tc/busybox
+          readelf -h tc/busybox | grep 'Machine:.*AArch64'
+
       - name: Assemble 23.05 initramfs (identical overlay + packer path)
         run: |
           set -euo pipefail
