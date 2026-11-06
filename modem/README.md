@@ -30,7 +30,7 @@ bring-up script that hands the resulting `rmnet_data0` to netifd.
 | File | Role |
 |---|---|
 | `modem-boot.c` | kernel module; drives `subsystem_get("modem")`, exposes sysfs |
-| `rmtfs` | procd init script; mounts firmware partition, wires `/lib/firmware`, starts rmtfs daemon |
+| `rmtfs` | procd init script; mounts firmware partition, wires `/lib/firmware`, creates the uio symlink, starts the rmtfs daemon |
 | `README.md` | this doc |
 
 ## What is already in place (kernel side)
@@ -85,6 +85,42 @@ Two traps this settles:
    otherwise. It is for SSR recovery only. Use the `boot` attribute for a
    cold boot.
 
+## rmtfs daemon: flags, the uio symlink, and why not `-s`
+
+`rmtfs` links `-lqrtr -ludev -lpthread` (raw `libqrtr` from
+`linux-msm/qrtr`; the OpenWrt feed's `libqrtr-glib` is a different glib
+wrapper and does not satisfy it). Its CLI (`rmtfs.c` `getopt(argc, argv,
+"o:S:Prsv")`):
+
+- `-r` — read-only EFS backing
+- `-o DIR` — storage root (default `/boot`)
+- `-P` — use raw EFS partitions by-name
+- `-s` — sync to the remoteproc. **Do not use on wayne**: it calls
+  `rproc_init()` and exits with "Failed to get rprocfd", because this kernel
+  boots the modem through PIL/`subsystem_get("modem")`, not the remoteproc
+  framework.
+- `-v` — verbose
+
+The daemon opens `/dev/qcom_rmtfs_uio1` **hardcoded** (`rmtfs_mem_open_uio()`)
+and reads udev sysattrs `maps/map0/{addr,size}` off it. Our kernel's
+`msm_sharedmem` driver creates a standard uio device (`/dev/uioN`, name
+`rmtfs`). So the init script creates the symlink
+`/dev/qcom_rmtfs_uio1` → `/dev/uioN` before starting the daemon. The
+daemon is invoked with `-r -o /var/lib/rmtfs` and no device argument.
+
+## Userspace stack (built from the feed / recipes)
+
+On the OpenWrt rootfs you need:
+
+- `rmtfs` — built from `openwrt-packages/rmtfs` (depends on raw `libqrtr` +
+  `libudev-zero`)
+- `libqmi` + `qmi-utils` — from the stock feed (`qmicli`, `qmi-network`); QRTR
+  is baked in (`Depends: libqrtr-glib`)
+- `libqrtr-glib`, `libmbim`, `glib2` — feed deps of libqmi
+- `libudev-zero` — drop-in libudev for rmtfs
+
+See `openwrt-packages/README.md` for the full build/install path.
+
 ## DT patch: not needed on `fix-ksu-sugrant`
 
 An earlier round of bring-up notes (and the supplied
@@ -106,8 +142,9 @@ gap `0x88f00000..0x8ac00000`, 2 MB-aligned so the guard pages fit.
 
 1. Kernel up; `/dev/uio*` present
 2. `rmtfs` init script (`START=95`) mounts the firmware partition
-   read-only and wires `/lib/firmware`
-3. `rmtfs` daemon answering remote-FS requests
+   read-only, wires `/lib/firmware`, creates
+   `/dev/qcom_rmtfs_uio1` → `/dev/uioN`
+3. `rmtfs` daemon (`-r -o /var/lib/rmtfs`) answering remote-FS requests
 4. Modem boot: `echo 1 > /sys/class/modem-boot/modem0/boot` (rc.local or
    init.d at `START=97+`)
 

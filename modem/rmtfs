@@ -26,9 +26,18 @@ START=95
 FIRMWARE_DIR="/mnt/modem"
 MODEM_PART=""
 RMTFS_BIN="/usr/bin/rmtfs"
-# Flags reported against a real rmtfs build: -d daemonize, -P skip the
-# setup script. Verify against your rmtfs source; drop if it differs.
-RMTFS_ARGS="-d -P"
+# rmtfs flags (rmtfs.c getopt "o:S:Prsv"): -r read-only EFS backing,
+# -o DIR storage root (default /boot). Do NOT pass -s: that opens the
+# remoteproc via rproc_init() and exits - wayne boots the modem through
+# PIL/subsystem_get("modem"), not the remoteproc framework. Do NOT pass
+# the uio node as argv - rmtfs opens /dev/qcom_rmtfs_uio1 itself (we
+# create that symlink below).
+RMTFS_ARGS="-r -o /var/lib/rmtfs"
+# rmtfs_mem_open_uio() opens /dev/qcom_rmtfs_uio1 hardcoded, then reads
+# udev sysattrs maps/map0/{addr,size} off it. Our kernel's msm_sharedmem
+# makes a standard uio device (/dev/uioN named "rmtfs"), so we need a
+# symlink to the rmtfs uio node.
+RMTFS_UIO_DEV="/dev/qcom_rmtfs_uio1"
 
 log() {
 	logger -t rmtfs "$@"
@@ -101,12 +110,15 @@ start() {
 		return 1
 	fi
 
+	# rmtfs opens /dev/qcom_rmtfs_uio1 hardcoded; symlink our uio node
+	ln -sf "$uio" "$RMTFS_UIO_DEV"
+
 	procd_open_instance
-	procd_set_param command "$RMTFS_BIN" $RMTFS_ARGS "$uio"
+	procd_set_param command "$RMTFS_BIN" $RMTFS_ARGS
 	procd_set_param respawn
 	procd_close_instance
 
-	log "rmtfs started on $uio; firmware wired from $FIRMWARE_DIR"
+	log "rmtfs started via $RMTFS_UIO_DEV -> $uio; firmware wired from $FIRMWARE_DIR"
 }
 
 stop() {
