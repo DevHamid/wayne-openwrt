@@ -9,7 +9,31 @@
 # NOTE: stock OpenWrt dhcp.lan pool is .100-.249, which would collide with
 # lan=.100, so the pool is moved to .110-.249.
 
-uci -q batch <<"EOF"
+# 23.05+ NOTE: UCI network model changed. `network.lan.ifname` is deprecated
+# (removed) in favor of `network.device` + `network.lan.device`. On 23.05
+# `add_list network.lan.ifname=usb0` is silently ignored (no device -> usb0
+# never joins br-lan -> no DHCP, no ssh). Detect the version and use the
+# right syntax. The bridge itself is created in usb-gadget.init at runtime
+# (`ip link set usb0 master br-lan`); this default just pins the IP + DHCP.
+
+if grep -q "release='23\.05" /etc/openwrt_release 2>/dev/null \
+   || grep -q "release='24\.10" /etc/openwrt_release 2>/dev/null; then
+  # 23.05+: usb0 is a device; bridge it into the lan bridge.
+  uci -q batch <<"EOF"
+set network.lan.ipaddr=192.168.1.100
+set network.lan.netmask=255.255.255.0
+set network.lan.device=br-lan
+set network.lan.type=bridge
+add_list network.lan.ports=usb0
+commit network
+
+set dhcp.lan.start=110
+set dhcp.lan.limit=140
+commit dhcp
+EOF
+else
+  # 21.02 and earlier: ifname list on the lan interface.
+  uci -q batch <<"EOF"
 set network.lan.ipaddr=192.168.1.100
 set network.lan.netmask=255.255.255.0
 add_list network.lan.ifname=usb0
@@ -19,6 +43,7 @@ set dhcp.lan.start=110
 set dhcp.lan.limit=140
 commit dhcp
 EOF
+fi
 
 /etc/init.d/network restart >/dev/null 2>&1
 /etc/init.d/dnsmasq restart >/dev/null 2>&1
