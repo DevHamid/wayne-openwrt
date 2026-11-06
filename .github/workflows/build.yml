@@ -381,6 +381,7 @@ jobs:
             config-usb.txt
             build/installer-boot.img
             build/installer-initramfs.cpio.gz
+            kernel/out/arch/arm64/boot/Image.gz-dtb
 
       # ---- v0.9.3 OTG HARD GATE (deliberately runs AFTER the upload) --------
       # The config-dump step above only PRINTS "FAIL:" -- it never exits, so a
@@ -409,6 +410,103 @@ jobs:
             exit 1
           fi
           echo "OTG hard gate PASSED: all OTG symbols resolved =y"
+
+  # ---- Test: can the 23.05 armsr/armv8 rootfs run on our 4.19 kernel? ----
+  # The main build pins 21.02.7 (kernel 5.4) because it is contemporary with
+  # our 4.19 vendor kernel. 23.05 (armsr/armv8, kernel 5.15) and 24.10
+  # (kernel 6.6) are NOT. This job reuses the main build's SAME compiled
+  # Image.gz-dtb (the artifact now ships it) and assembles a 23.05 initramfs
+  # with the IDENTICAL overlay + packer the main build uses, so the ONLY
+  # variable is the rootfs. It verifies assembly end-to-end; the actual on
+  # -device boot gate cannot happen in GitHub Actions (no sdm660 QEMU), so
+  # this produces the flashable test image + a hard assembly gate.
+  test-rootfs-2305:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the main build's compiled kernel (Image.gz-dtb)
+        uses: actions/download-artifact@v4
+        with:
+          name: wayne-openwrt
+          path: main-artifact
+
+      - name: Locate kernel + donor boot image
+        run: |
+          set -euo pipefail
+          KERNEL=$(find main-artifact -name 'Image.gz-dtb' | head -1)
+          [ -n "$KERNEL" ] || { echo "::error::Image.gz-dtb missing from main artifact"; exit 1; }
+          echo "KERNEL=$KERNEL" >> $GITHUB_ENV
+          echo "kernel: $KERNEL ($(wc -c < "$KERNEL") bytes)"
+          wget -q https://github.com/DevHamid/Kernel_Action/raw/c947c2c04f1445437f507f2b138c34e918d3d54f/boot/boot.img -O donor-boot.img
+          ls -lh donor-boot.img
+
+      - name: Download ImmortalWrt 23.05 armsr/armv8 rootfs
+        run: |
+          set -euo pipefail
+          mkdir -p rootfs
+          wget -q \
+            https://downloads.immortalwrt.org/releases/23.05.4/targets/armsr/armv8/immortalwrt-23.05.4-armsr-armv8-rootfs.tar.gz \
+            -O rootfs/openwrt-rootfs.tar.gz
+          ls -lh rootfs/openwrt-rootfs.tar.gz
+          # A 23.05 rootfs is NOT 21.02: the preinit/procd layout differs.
+          tar tzf rootfs/openwrt-rootfs.tar.gz | grep -E '^(\./)?(init|sbin/procd|etc/preinit)$' | sort
+
+      - name: Assemble 23.05 initramfs (identical overlay + packer path)
+        run: |
+          set -euo pipefail
+          mkdir -p build/openwrt
+          cd build/openwrt
+          tar xzf ../../rootfs/openwrt-rootfs.tar.gz
+          ln -sf busybox bin/sh
+          cp ../../overlay-openwrt/init init
+          chmod +x init
+          cp ../../overlay-common/usb-gadget.sh usb-gadget.sh
+          chmod +x usb-gadget.sh
+          cp ../../overlay-openwrt/usb-gadget.init etc/init.d/usb-gadget
+          chmod +x etc/init.d/usb-gadget
+          ln -sf ../init.d/usb-gadget etc/rc.d/S95usb-gadget
+          mkdir -p etc/uci-defaults
+          cp ../../overlay-openwrt/etc/uci-defaults/90-usb0-lan etc/uci-defaults/90-usb0-lan
+          chmod +x etc/uci-defaults/90-usb0-lan
+          # Preserve the 21.02 burn-in + M-inv packaging so the 23.05 image is
+          # an honest apples-to-apples swap of the rootfs only.
+          mkdir -p root
+          cp ../../scripts/screen.sh root/screen.sh
+          chmod +x root/screen.sh
+          cp ../../scripts/m6-roleswitch.sh root/m6.sh
+          cp ../../scripts/vbus-host-test.sh root/vbus-host-test.sh
+          chmod +x root/m6.sh root/vbus-host-test.sh
+          cp ../../scripts/m7-docker-probe.sh root/m7.sh
+          chmod +x root/m7.sh
+          cp ../../overlay-openwrt/etc/init.d/burnin-guard etc/init.d/burnin-guard
+          chmod +x etc/init.d/burnin-guard
+          ln -sf ../init.d/burnin-guard etc/rc.d/S99burnin-guard
+          cp ../../tc/busybox bin/busybox-static 2>/dev/null || echo "WARN: no busybox-static copied (23.05 ships its own)"
+          (find . -print0 | cpio --null -o --format=newc 2>/dev/null | gzip -9 > ../openwrt-initramfs.cpio.gz)
+          ls -lh ../openwrt-initramfs.cpio.gz
+
+      - name: Download mkbootimg + pack 23.05 test boot image
+        run: |
+          set -euo pipefail
+          git clone --depth=1 https://android.googlesource.com/platform/system/tools/mkbootimg mkboot -b master-kernel-build-2022
+          python3 scripts/pack-boot.py mkboot donor-boot.img \
+            "$KERNEL" \
+            build/openwrt-initramfs.cpio.gz build/openwrt-2305-boot.img
+          ls -lh build/openwrt-2305-boot.img
+          # Path contains spaces; find it via env instead of quoting in the runner
+          python3 scripts/check-pack.py mkboot donor-boot.img \
+            "$KERNEL" \
+            build/openwrt-initramfs.cpio.gz
+
+      - name: Upload 23.05 test image
+        uses: actions/upload-artifact@v4
+        with:
+          name: wayne-openwrt-2305
+          path: |
+            build/openwrt-2305-boot.img
+            build/openwrt-initramfs.cpio.gz
 
   # ---- Tag-triggered Release (NO rebuild) ----------------------------------
   # Push a tag like `git tag v0.9.5 && git push origin v0.9.5`. This job does
