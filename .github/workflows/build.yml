@@ -460,6 +460,11 @@ jobs:
           cd build/openwrt
           tar xzf ../../rootfs/openwrt-rootfs.tar.gz
           ln -sf busybox bin/sh
+          # Serial login on the configfs acm.usb0 console (g_serial removed, M5);
+          # must match the main 21.02 build exactly. 23.05's stock inittab has
+          # no ttyGS0 line, so without this the acm serial console never spawns
+          # a login (picocom opens the port but gets no prompt).
+          echo 'ttyGS0::askfirst:/usr/libexec/login.sh' >> etc/inittab
           cp ../../overlay-openwrt/init init
           chmod +x init
           cp ../../overlay-common/usb-gadget.sh usb-gadget.sh
