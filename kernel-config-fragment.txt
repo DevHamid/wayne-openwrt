@@ -57,14 +57,18 @@ CONFIG_IPV6=y
 CONFIG_BRIDGE=y
 CONFIG_VLAN_8021Q=y
 
-# USB gadget ethernet (NCM/RNDIS via configfs): already in the vendor defconfig.
-# NOTE: we deliberately do NOT set CONFIG_USB_ETH here. The legacy "precomposed"
-# gadgets (g_ether/g_serial/...) form a single-select Kconfig choice -- setting
-# both USB_ETH and USB_G_SERIAL makes kconfig keep one and silently drop the
-# other with an "override:" warning. Future USB-ethernet work should use the
-# configfs functions below (NCM/RNDIS), which are composable at runtime.
+# USB gadget ethernet: ECM (CDC Ethernet) is the PRIMARY transport.
+# SWITCHED FROM RNDIS (2026-11-07): RNDIS stalled hard on a Linux host --
+# rndis_host logged "NETDEV WATCHDOG: transmit queue 0 timed out", ARP never
+# resolved, 100% packet loss. RNDIS is a Microsoft protocol with known
+# instability on non-Windows hosts; ECM is the native Linux CDC path
+# (cdc_ether driver, no rndis_host quirks). The PC needs no extra driver.
 CONFIG_USB_CONFIGFS=y
+CONFIG_USB_CONFIGFS_ECM=y
+# NCM kept as a fallback (also composable, higher throughput).
 CONFIG_USB_CONFIGFS_NCM=y
+# RNDIS kept enabled in the kernel but NOT used by the gadget -- Windows
+# hosts that fail ECM can still be served by switching the function back.
 CONFIG_USB_CONFIGFS_RNDIS=y
 CONFIG_USB_GADGET=y
 

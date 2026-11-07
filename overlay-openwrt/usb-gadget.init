@@ -1,48 +1,44 @@
 #!/bin/sh /etc/rc.common
-# /etc/init.d/usb-gadget -- build the wayne composite USB gadget (acm + rndis)
+# /etc/init.d/usb-gadget -- build the wayne composite USB gadget (acm + ecm)
 # on the PERSISTENT OpenWrt rootfs (p64). The initramfs /init builds the gadget
 # for the installer/debug images; after switch_root to /sbin/init (procd) there
 # is no /init of ours, so this service does the same job for the real system.
 #
-# Result: acm.usb0 -> /dev/ttyGS0 (serial console), rndis.usb0 -> usb0 (ethernet).
+# Result: acm.usb0 -> /dev/ttyGS0 (serial console), ecm.usb0 -> usb0 (ethernet).
 # Needed because CONFIG_USB_G_SERIAL is gone (M5): nothing auto-binds the UDC.
 #
-# M5 LESSON (2026-10-15): a raw `ip addr add 192.168.42.1/24 dev usb0` is NOT
-# enough. netifd/dnsmasq/dropbear only know about UCI interfaces, so dropbear's
-# init refuses to start with:
-#   "interface lan usb0 has no physdev or physdev has no suitable ip"
-# and dnsmasq serves no DHCP on usb0 (the PC then has no IPv4 at all and ssh
-# gets ECONNREFUSED). The fallback below therefore creates usb0 as a REAL UCI
-# interface (network.usb0 + dhcp.usb0) so plugging the phone into a PC yields
-# DHCP 192.168.42.100+ and `ssh root@192.168.42.1` with no manual steps.
+# NETWORK MODEL (2026-11-07): usb0 is a STANDALONE static interface at
+# 192.168.1.1/24. No bridge -- this device has no eth0, and netifd on this
+# vendor 4.19 tree never instantiated the br-lan device (ifstatus: NO_DEVICE).
+# The uci-defaults script 90-usb0-lan sets this up on first boot; this service
+# only re-asserts it if the config is missing (e.g. a rootfs that predates it).
 
 START=95
 STOP=10
 USE_PROCD=1
 
-# Make usb0 a first-class UCI interface: static IP + DHCP server + dropbear bind.
+# Make usb0 a first-class UCI interface: static IP + DHCP server.
 ensure_usb0_uci() {
     if ! uci -q get network.usb0 >/dev/null; then
         uci set network.usb0=interface
         uci set network.usb0.proto='static'
         uci set network.usb0.device='usb0'
-        uci set network.usb0.ipaddr='192.168.42.1'
+        uci set network.usb0.ipaddr='192.168.1.1'
         uci set network.usb0.netmask='255.255.255.0'
         uci commit network
-        logger -t usb-gadget "created network.usb0 (static 192.168.42.1/24)"
+        logger -t usb-gadget "created network.usb0 (static 192.168.1.1/24)"
     fi
     if ! uci -q get dhcp.usb0 >/dev/null; then
         uci set dhcp.usb0=dhcp
         uci set dhcp.usb0.interface='usb0'
         uci set dhcp.usb0.start='100'
-        uci set dhcp.usb0.limit='50'
+        uci set dhcp.usb0.limit='150'
         uci set dhcp.usb0.leasetime='12h'
         uci commit dhcp
-        logger -t usb-gadget "created dhcp.usb0 (DHCP 192.168.42.100+)"
+        logger -t usb-gadget "created dhcp.usb0 (DHCP 192.168.1.100+)"
     fi
-    # dropbear: duplicate Interface='usb0' 'usb0' kills listener.
-    # PROVEN GOOD (2026-10-15): single usb0 -> LISTEN 192.168.42.1:22.
-    # Normalize every boot: delete then add once.
+    # dropbear: duplicate Interface entries kill the listener. Normalize to
+    # a single usb0 entry every boot (delete then add once).
     uci -q delete dropbear.@dropbear[0].Interface
     uci add_list dropbear.@dropbear[0].Interface='usb0'
     uci commit dropbear
@@ -59,14 +55,8 @@ start_service() {
     [ -e /sys/class/net/usb0 ] || return 0
 
     ip link set usb0 up 2>/dev/null
-    # Preferred: join br-lan. dnsmasq then serves DHCP and dropbear (Interface
-    # 'lan') is already listening -- the PC just runs `ssh root@192.168.1.1`.
-    if ip link set usb0 master br-lan 2>/dev/null; then
-        logger -t usb-gadget "usb0 bridged into br-lan"
-        return 0
-    fi
-    # Fallback: usb0 as its own UCI interface (netifd + dnsmasq + dropbear).
+    # usb0 is standalone (no bridge). Re-assert the UCI config if missing.
     ensure_usb0_uci
-    logger -t usb-gadget "usb0 standalone 192.168.42.1/24 (UCI)"
+    logger -t usb-gadget "usb0 standalone 192.168.1.1/24 (UCI)"
     return 0
 }

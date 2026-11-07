@@ -8,10 +8,10 @@
 # itself boots on wayne hardware. If this works and the full OpenWrt image does
 # not, the fault is in OpenWrt's userspace -- not kernel, not DTB, not bootloader.
 #
-# Serial console + USB ethernet: ONE configfs composite gadget (acm + rndis),
+# Serial console + USB ethernet: ONE configfs composite gadget (acm + ecm),
 # built by overlay-common/usb-gadget.sh, sourced below.
 #  - acm.usb0   -> /dev/ttyGS0 (CDC-ACM on the PC: /dev/ttyACM0 or COMx)
-#  - rndis.usb0 -> usb0        (USB ethernet)
+#  - ecm.usb0 -> usb0        (USB ethernet)
 # CONFIG_USB_G_SERIAL is NOT set (M5 finding): legacy g_serial grabbed the
 # single UDC at boot and blocked configfs gadgets with "Resource busy".
 
@@ -32,7 +32,7 @@ echo " wayne-openwrt DEBUG initramfs -- kernel booted OK"
 echo "==================================================="
 
 # --- Bring up the composite USB gadget (console + ethernet) -----------------
-echo "--- bringing up USB gadget (acm + rndis)... ---"
+echo "--- bringing up USB gadget (acm + ecm)... ---"
 if [ -r /usb-gadget.sh ]; then
     . /usb-gadget.sh
     if usb_gadget_up; then

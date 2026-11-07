@@ -51,17 +51,20 @@ usb_gadget_up() {
     echo "Xiaomi" > "$G/strings/0x409/manufacturer"
     echo "Wayne M5" > "$G/strings/0x409/product"
     mkdir -p "$G/configs/c.1/strings/0x409"
-    echo "Config 1: ACM+RNDIS" > "$G/configs/c.1/strings/0x409/configuration"
+    echo "Config 1: ACM+ECM" > "$G/configs/c.1/strings/0x409/configuration"
     echo 120 > "$G/configs/c.1/MaxPower"
 
     mkdir -p "$G/functions/acm.usb0"
-    mkdir -p "$G/functions/rndis.usb0"
-    # RNDIS MAC (host will see this)
-    echo "02:1a:11:11:55:00" > "$G/functions/rndis.usb0/host_addr" 2>/dev/null
-    echo "02:1a:11:11:55:01" > "$G/functions/rndis.usb0/dev_addr" 2>/dev/null
+    # ECM (CDC Ethernet) -- primary transport. RNDIS was dropped 2026-11-07
+    # after it stalled on a Linux host (rndis_host NETDEV WATCHDOG, ARP never
+    # resolved). ECM binds the native cdc_ether driver on the PC side.
+    mkdir -p "$G/functions/ecm.usb0"
+    # ECM MAC (host will see this)
+    echo "02:1a:11:11:55:00" > "$G/functions/ecm.usb0/host_addr" 2>/dev/null
+    echo "02:1a:11:11:55:01" > "$G/functions/ecm.usb0/dev_addr" 2>/dev/null
 
     ln -sf "$G/functions/acm.usb0" "$G/configs/c.1/"
-    ln -sf "$G/functions/rndis.usb0" "$G/configs/c.1/"
+    ln -sf "$G/functions/ecm.usb0" "$G/configs/c.1/"
 
     # 6) Bind
     if ! echo "$UDC" > "$G/UDC" 2>/dev/null; then

@@ -79,7 +79,7 @@ sleep 3
 
 # --- 3. USB gadget (console + ethernet) ------------------------------------
 # g_serial is gone (M5 finding), so nothing auto-binds the UDC. Build the
-# composite acm+rndis gadget here: ttyGS0 for this console, usb0 for ethernet.
+# composite acm+ecm gadget here: ttyGS0 for this console, usb0 for ethernet.
 if [ -r /usb-gadget.sh ]; then
     . /usb-gadget.sh
     if usb_gadget_up; then

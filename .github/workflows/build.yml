@@ -84,7 +84,7 @@ jobs:
           done
           cp overlay-debug/init build/debug/init
           chmod +x build/debug/init
-          # Composite USB gadget builder (acm + rndis); g_serial is gone (M5).
+          # Composite USB gadget builder (acm + ecm); g_serial is gone (M5).
           cp overlay-common/usb-gadget.sh build/debug/usb-gadget.sh
           chmod +x build/debug/usb-gadget.sh
           (cd build/debug && find . -print0 | cpio --null -o --format=newc 2>/dev/null | gzip -9 > ../debug-initramfs.cpio.gz)
@@ -103,7 +103,7 @@ jobs:
           # Inject our /init wrapper (kernel -> procd handoff)
           cp ../../overlay-openwrt/init init
           chmod +x init
-          # Composite USB gadget builder (acm + rndis); g_serial is gone (M5).
+          # Composite USB gadget builder (acm + ecm); g_serial is gone (M5).
           cp ../../overlay-common/usb-gadget.sh usb-gadget.sh
           chmod +x usb-gadget.sh
           # Same gadget as a procd service (runs after /init already did it;
@@ -137,7 +137,7 @@ jobs:
           cp ../../overlay-openwrt/etc/init.d/burnin-guard etc/init.d/burnin-guard
           chmod +x etc/init.d/burnin-guard
           ln -sf ../init.d/burnin-guard etc/rc.d/S99burnin-guard
-          # M8a: WebUI over RNDIS — fixed LAN IP + usb0 into br-lan
+          # M8a: WebUI over USB ECM — standalone usb0 at 192.168.1.1
           mkdir -p etc/uci-defaults
           cp ../../overlay-openwrt/etc/uci-defaults/90-usb0-lan etc/uci-defaults/90-usb0-lan
           chmod +x etc/uci-defaults/90-usb0-lan
@@ -277,9 +277,10 @@ jobs:
           done
 
       # M5 gate: the WHOLE point of this build is that g_serial is gone and the
-      # configfs composite gadget (acm + rndis) can claim the single UDC. If
+      # configfs composite gadget (acm + ecm) can claim the single UDC. If
       # USB_G_SERIAL still resolves =y, the flash is wasted -- fail here instead.
-      - name: M5 gate (g_serial gone, configfs acm+rndis present)
+      # ECM (not RNDIS) since 2026-11-07: RNDIS stalled on a Linux host.
+      - name: M5 gate (g_serial gone, configfs acm+ecm present)
         run: |
           cd kernel
           fail=0
@@ -289,7 +290,7 @@ jobs:
           else
             echo "PASS: USB_G_SERIAL not =y (g_serial removed)"
           fi
-          for sym in CONFIG_USB_CONFIGFS CONFIG_USB_CONFIGFS_ACM CONFIG_USB_CONFIGFS_RNDIS CONFIG_USB_LIBCOMPOSITE CONFIG_USB_GADGET; do
+          for sym in CONFIG_USB_CONFIGFS CONFIG_USB_CONFIGFS_ACM CONFIG_USB_CONFIGFS_ECM CONFIG_USB_LIBCOMPOSITE CONFIG_USB_GADGET; do
             if grep -q "^${sym}=y" out/.config; then
               echo "PASS: ${sym}=y"
             else
@@ -302,7 +303,7 @@ jobs:
             echo "::error::M5 gate failed: composite USB gadget would not work on device. Not flashing this."
             exit 1
           fi
-          echo "M5 gate PASSED: g_serial gone, configfs acm+rndis ready"
+          echo "M5 gate PASSED: g_serial gone, configfs acm+ecm ready"
 
       - name: Pack boot images (kernel + our initramfs)
         run: |
