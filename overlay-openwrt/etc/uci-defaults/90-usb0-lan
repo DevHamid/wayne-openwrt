@@ -1,49 +1,65 @@
 #!/bin/sh
 # /etc/uci-defaults/90-usb0-lan -- runs once on first boot, then deletes itself.
 #
-# M8a: WebUI over RNDIS.
-# Root cause: /init brings up usb0 (RNDIS) but nothing assigns it an address or
-# bridges it into br-lan, so the PC sees the link but LuCI is unreachable.
-# Fix: put usb0 in br-lan and pin lan to 192.168.1.100.
+# M8a: WebUI + SSH over the USB RNDIS gadget (usb0).
 #
-# NOTE: stock OpenWrt dhcp.lan pool is .100-.249, which would collide with
-# lan=.100, so the pool is moved to .110-.249.
+# Root cause of the original failure (2026-11-06):
+#   1. Version detection grepped lowercase "release='23.05" but
+#      /etc/openwrt_release stores DISTRIB_RELEASE='23.05.4' (UPPERCASE).
+#      Case-sensitive grep never matched -> the 21.02 branch ran on 23.05.
+#   2. The 21.02 branch set network.lan.ifname=usb0, which 23.05 ignores.
+#      usb0 was never placed in the bridge -> no IP, no DHCP, no SSH.
+#
+# Boot order (ImmortalWrt 23.05, /etc/init.d/boot START=10):
+#   /bin/config_generate   -> creates network.@device[0]=br-lan ports='eth0'
+#                             and network.lan (static, from board.d)
+#   uci_apply_defaults     -> runs THIS script (device section already exists)
+#
+# 23.05 network model: a bridge is a DEVICE section; its ports live in
+# network.@device[N].ports, NOT on the interface. This device has no eth0,
+# so the stock bridge (ports='eth0') is useless -- swap it to usb0.
 
-# 23.05+ NOTE: UCI network model changed. `network.lan.ifname` is deprecated
-# (removed) in favor of `network.device` + `network.lan.device`. On 23.05
-# `add_list network.lan.ifname=usb0` is silently ignored (no device -> usb0
-# never joins br-lan -> no DHCP, no ssh). Detect the version and use the
-# right syntax. The bridge itself is created in usb-gadget.init at runtime
-# (`ip link set usb0 master br-lan`); this default just pins the IP + DHCP.
+REL=$(grep -i "distrib_release" /etc/openwrt_release 2>/dev/null | cut -d"'" -f2)
 
-if grep -q "release='23\.05" /etc/openwrt_release 2>/dev/null \
-   || grep -q "release='24\.10" /etc/openwrt_release 2>/dev/null; then
-  # 23.05+: usb0 is a device; bridge it into the lan bridge.
-  uci -q batch <<"EOF"
-set network.lan.ipaddr=192.168.1.100
-set network.lan.netmask=255.255.255.0
-set network.lan.device=br-lan
-set network.lan.type=bridge
-add_list network.lan.ports=usb0
-commit network
+if echo "$REL" | grep -qE '^(23|24)\.'; then
+    # ---- 23.05 / 24.10: bridge device model ----
+    # config_generate made network.@device[0] = br-lan with ports='eth0'.
+    # Find that device by name and repoint its single port to usb0.
+    for i in $(seq 0 9); do
+        name=$(uci -q get network.@device[$i].name 2>/dev/null)
+        [ "$name" = "br-lan" ] || continue
+        uci -q delete network.@device[$i].ports
+        uci add_list network.@device[$i].ports='usb0'
+        break
+    done
 
-set dhcp.lan.start=110
-set dhcp.lan.limit=140
-commit dhcp
-EOF
+    # lan interface rides the bridge; pin the gateway IP.
+    uci set network.lan.device='br-lan'
+    uci set network.lan.proto='static'
+    uci set network.lan.ipaddr='192.168.1.1'
+    uci set network.lan.netmask='255.255.255.0'
+    # Drop the legacy ifname (ignored on 23.05, only causes confusion).
+    uci -q delete network.lan.ifname
+    uci commit network
 else
-  # 21.02 and earlier: ifname list on the lan interface.
-  uci -q batch <<"EOF"
-set network.lan.ipaddr=192.168.1.100
-set network.lan.netmask=255.255.255.0
-add_list network.lan.ifname=usb0
-commit network
-
-set dhcp.lan.start=110
-set dhcp.lan.limit=140
-commit dhcp
-EOF
+    # ---- 21.02 and earlier: ifname list on the lan interface ----
+    uci set network.lan.ipaddr='192.168.1.1'
+    uci set network.lan.netmask='255.255.255.0'
+    uci -q delete network.lan.ifname
+    uci add_list network.lan.ifname='usb0'
+    uci commit network
 fi
+
+# DHCP pool must not collide with the gateway (.1). Stock pool .100-.249 is fine.
+uci set dhcp.lan.start='100'
+uci set dhcp.lan.limit='150'
+uci set dhcp.lan.leasetime='12h'
+uci commit dhcp
+
+# dropbear: the build already strips 'option Interface lan'; make sure no
+# per-interface filter remains so it listens on usb0 too.
+uci -q delete dropbear.@dropbear[0].Interface
+uci commit dropbear
 
 /etc/init.d/network restart >/dev/null 2>&1
 /etc/init.d/dnsmasq restart >/dev/null 2>&1
