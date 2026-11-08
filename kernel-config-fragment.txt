@@ -189,3 +189,16 @@ CONFIG_BRIDGE=y
 # =y is the only safe value (MODULES=y alone leaves MODVERSIONS etc. off; the
 # Android-style '=m' would turn the whole vendor tree into a module tree).
 CONFIG_MODULES=y
+
+# ---------------------------------------------------------------------------
+# PROBE: disable POC fast idle CPU selector (kernel commit 5e69909e09 on
+# fix-ksu-sugrant). The port does not compile against this 4.19 sdm660 tree:
+#   kernel/sched/poc_selector.c:455: incomplete definition of type
+#       'struct sched_domain_shared'      (4.19 lacks sad->ss_* fields)
+#   kernel/sched/poc_selector.c:429: implicit declaration of 'POC_CTZ64'
+#   kernel/sched/poc_selector.c:265: use of undeclared identifier
+#       'sched_poc_count_enabled'
+# init/Kconfig:1254 gives it 'default y', so it must be turned off
+# explicitly. Nothing in the modem_boot.ko path depends on it; re-enable only
+# after the POC port is fixed AND verified green.
+# CONFIG_SCHED_POC_SELECTOR is not set
