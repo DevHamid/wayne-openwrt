@@ -147,14 +147,21 @@ jobs:
 
       - name: Clone kernel source (with KernelSU submodule)
         run: |
-          # PINNED to 869a08ebbb (last known-good). Branch head moved to
-          # 5e69909e09 (POC idle CPU selector) which breaks kernel/sched/fair.c
-          # with 'implicit declaration of schedtune_task_boost_rcu_locked'.
-          # Remove this pin once that commit is fixed upstream.
+          # PINNED to 12b01ae978. Two reasons, both on the KERNEL side:
+          # 1) 5e69909e09 (POC idle CPU selector) breaks kernel/sched/fair.c:
+          #    implicit declaration of schedtune_task_boost_rcu_locked.
+          # 2) 12b01ae978 restores module_assert_mutex(), which a bad merge
+          #    dropped from kernel/module.c. It is only reachable with
+          #    CONFIG_MODULES=y, so it stayed latent until we started
+          #    building modules -- without it every module build dies on
+          #    kernel/module.c:625. Upstream has a stub for the schedtune
+          #    case in b29788a519, but POC/BORE/ADIOS (1ece735566) also landed
+          #    and are untested here. Pin until the whole 11-08 scheduler
+          #    batch is verified green, then remove.
           git clone --recurse-submodules \
             https://github.com/DevHamid/LKGeek_sdm660.git kernel
           cd kernel
-          git checkout 869a08ebbb
+          git checkout 12b01ae978
           git submodule update --init --recursive
           cd ..
           # drivers/kernelsu is a SYMLINK into the KernelSU submodule; a broken
