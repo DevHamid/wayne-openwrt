@@ -147,9 +147,16 @@ jobs:
 
       - name: Clone kernel source (with KernelSU submodule)
         run: |
-          git clone --recurse-submodules --depth=1 \
-            https://github.com/DevHamid/LKGeek_sdm660.git \
-            -b fix-ksu-sugrant kernel
+          # PINNED to 869a08ebbb (last known-good). Branch head moved to
+          # 5e69909e09 (POC idle CPU selector) which breaks kernel/sched/fair.c
+          # with 'implicit declaration of schedtune_task_boost_rcu_locked'.
+          # Remove this pin once that commit is fixed upstream.
+          git clone --recurse-submodules \
+            https://github.com/DevHamid/LKGeek_sdm660.git kernel
+          cd kernel
+          git checkout 869a08ebbb
+          git submodule update --init --recursive
+          cd ..
           # drivers/kernelsu is a SYMLINK into the KernelSU submodule; a broken
           # symlink makes drivers/Kconfig:242 fail with "can't open file".
           test -f kernel/drivers/kernelsu/Kconfig \
