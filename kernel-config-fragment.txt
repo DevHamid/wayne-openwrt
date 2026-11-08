@@ -180,3 +180,12 @@ CONFIG_BRIDGE=y
 # is a no-op and published-port DNAT across the bridge needs the userland proxy
 # (docker --userland-proxy=true, its default) to hold. Record it as a probe
 # limitation, do not re-add this symbol without porting br_netfilter.
+
+# ---------------------------------------------------------------------------
+# Loadable module support. REQUIRED for modem_boot.ko / rmtfs.ko: this tree's
+# vendor defconfig carries no CONFIG_MODULES line, so kconfig defaults it to
+# n and 'make modules' / 'make modules_install' abort with:
+#   "The present kernel configuration has modules disabled."
+# =y is the only safe value (MODULES=y alone leaves MODVERSIONS etc. off; the
+# Android-style '=m' would turn the whole vendor tree into a module tree).
+CONFIG_MODULES=y
