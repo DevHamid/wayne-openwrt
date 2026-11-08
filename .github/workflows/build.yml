@@ -328,6 +328,7 @@ jobs:
           # Reuse the SAME pinned donor image as the control step
           python3 scripts/pack-boot.py mkboot donor-boot.img \
             kernel/out/arch/arm64/boot/Image.gz-dtb \
+            kernel_modules/
             build/debug-initramfs.cpio.gz build/debug-boot.img
           python3 scripts/pack-boot.py mkboot donor-boot.img \
             kernel/out/arch/arm64/boot/Image.gz-dtb \
@@ -526,6 +527,17 @@ jobs:
           chmod +x etc/init.d/burnin-guard
           ln -sf ../init.d/burnin-guard etc/rc.d/S99burnin-guard
           cp ../../tc/busybox bin/busybox-static 2>/dev/null || echo "WARN: no busybox-static copied (23.05 ships its own)"
+          # Install kernel modules (modem_boot.ko etc.) from the main build
+          if [ -d ../../main-artifact ] && ls ../../main-artifact/kernel_modules/lib/modules >/dev/null 2>&1; then
+            for kv in $(ls ../../main-artifact/kernel_modules/lib/modules); do
+              mkdir -p lib/modules/$kv
+              cp -r ../../main-artifact/kernel_modules/lib/modules/$kv/* lib/modules/$kv/ 2>/dev/null || true
+              echo "modules staged for $kv:"
+              ls lib/modules/$kv/*.ko 2>/dev/null || echo "WARN: no .ko for $kv"
+            done
+          else
+            echo "WARN: kernel_modules not in main artifact -- modem_boot.ko will be missing"
+          fi
           (find . -print0 | cpio --null -o --format=newc 2>/dev/null | gzip -9 > ../openwrt-initramfs.cpio.gz)
           ls -lh ../openwrt-initramfs.cpio.gz
 
