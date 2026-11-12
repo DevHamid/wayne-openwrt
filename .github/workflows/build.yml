@@ -381,9 +381,13 @@ jobs:
       - name: Pack boot images (kernel + our initramfs)
         run: |
           # Reuse the SAME pinned donor image as the control step
+          # pack-boot.py takes exactly 5 args:
+          #   MKBOOT_DIR DONOR_IMG KERNEL RAMDISK OUTPUT
+          # A stray "kernel_modules/" line here made it 6 and the packer
+          # exited with its usage message. Modules ship via modules_install
+          # into the rootfs, not into the boot image.
           python3 scripts/pack-boot.py mkboot donor-boot.img \
             kernel/out/arch/arm64/boot/Image.gz-dtb \
-            kernel_modules/
             build/debug-initramfs.cpio.gz build/debug-boot.img
           python3 scripts/pack-boot.py mkboot donor-boot.img \
             kernel/out/arch/arm64/boot/Image.gz-dtb \
