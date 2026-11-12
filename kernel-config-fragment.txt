@@ -159,10 +159,18 @@ CONFIG_USB_ACM=y
 # ("Your kernel does not support memory limit capabilities"), and containers
 # get no network without veth pairs. These are pure enablers: nothing above
 # changes existing boot behaviour.
-# MEMCG deliberately withheld in this commit: run f6613d1 (which failed the
-# kernel build) without it to bisect. If this build is green, MEMCG is the
-# breaker and the vendor mm/ tree does not compile with it.
-# CONFIG_MEMCG is not set
+# MEMCG was withheld as a bisect probe on the 12b01ae978 pin (run f6613d1
+# failed the build). Resolved: LKGeek_sdm660 commit 1c46e3f2 on
+# fix-ksu-sugrant landed the working container set and is only on that branch,
+# so wireguard-linux does not carry it. The failure was never the vendor mm/
+# tree failing to compile with MEMCG -- it was MEMCG_KMEM without the MGLRU
+# shrinker_rwsem fix. Docker's memory limits and OOM behaviour need MEMCG, and
+# MGLRU's per-memcg reclaim paths (get_lruvec, get_mm_list,
+# mem_cgroup_page_lruvec) are all #ifdef CONFIG_MEMCG guarded. MEMCG_KMEM is a
+# hidden bool with 'default y' under MEMCG, pulled in automatically.
+CONFIG_MEMCG=y
+CONFIG_MEMCG_SWAP=y
+CONFIG_MEMCG_SWAP_ENABLED=y
 CONFIG_CGROUP_DEVICE=y
 CONFIG_CGROUP_FREEZER=y
 CONFIG_CGROUP_PIDS=y
@@ -202,3 +210,7 @@ CONFIG_MODULES=y
 # explicitly. Nothing in the modem_boot.ko path depends on it; re-enable only
 # after the POC port is fixed AND verified green.
 # CONFIG_SCHED_POC_SELECTOR is not set
+# Remaining container/overlay-network dependencies (LKGeek 1c46e3f2).
+CONFIG_BINFMT_MISC=y
+CONFIG_VXLAN=y
+CONFIG_NETFILTER_XT_MATCH_IPVS=y
