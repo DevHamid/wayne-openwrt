@@ -309,16 +309,23 @@ jobs:
           export PATH="$GITHUB_WORKSPACE/tc/clang-aosp/bin:$PATH"
           # Install modules to staging
           make -j$(nproc) O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- LD=ld.lld ${{ env.GCC_64 }} ${{ env.GCC_32 }} modules_install INSTALL_MOD_PATH=$GITHUB_WORKSPACE/kernel_modules
-          # Copy modules to OpenWrt rootfs
-          mkdir -p build/openwrt/lib/modules
-          cp -r $GITHUB_WORKSPACE/kernel_modules/lib/modules/* build/openwrt/lib/modules/ 2>/dev/null || true
-          # Generate module dependencies
-          for kv in $(ls $GITHUB_WORKSPACE/kernel_modules/lib/modules 2>/dev/null); do
-            depmod -a $GITHUB_WORKSPACE/kernel_modules/lib/modules/$kv || true
+          # Copy modules to OpenWrt rootfs.
+          # NOTE: this step runs after `cd kernel`, so every path below must be
+          # rooted at $GITHUB_WORKSPACE. Writing to bare `build/openwrt` created
+          # kernel/build/openwrt and the initramfs re-pack then failed with
+          # "cannot access ../openwrt-initramfs.cpio.gz".
+          ROOTFS="$GITHUB_WORKSPACE/build/openwrt"
+          mkdir -p "$ROOTFS/lib/modules"
+          cp -r "$GITHUB_WORKSPACE"/kernel_modules/lib/modules/* "$ROOTFS/lib/modules/" 2>/dev/null || true
+          # Generate module dependencies. `depmod -a <path>` treats <path> as a
+          # kernel VERSION, hence "ERROR: Bad version passed". Use -b <basedir>
+          # so depmod reads lib/modules/<ver> underneath it.
+          for kv in $(ls "$ROOTFS/lib/modules" 2>/dev/null); do
+            depmod -b "$ROOTFS" -a "$kv" || true
           done
-          # Re-pack OpenWrt initramfs (was packed earlier at line 145)
-          (cd build/openwrt && find . -print0 | cpio --null -o --format=newc 2>/dev/null | gzip -9 > ../openwrt-initramfs.cpio.gz)
-          ls -lh ../openwrt-initramfs.cpio.gz
+          # Re-pack OpenWrt initramfs (was packed earlier, before modules existed)
+          (cd "$ROOTFS" && find . -print0 | cpio --null -o --format=newc 2>/dev/null | gzip -9 > "$GITHUB_WORKSPACE/build/openwrt-initramfs.cpio.gz")
+          ls -lh "$GITHUB_WORKSPACE/build/openwrt-initramfs.cpio.gz"
 
 
       - name: Dump resolved kernel config (OTG/F2FS/SQUASHFS ground truth)
