@@ -50,14 +50,17 @@
  */
 
 #include <linux/module.h>
-#include <linux/kernel.h>
+#include <linux/kernel.h>	/* kstrtouint(); this tree has no linux/kstrto.h */
 #include <linux/init.h>
 #include <linux/device.h>
 #include <linux/err.h>
 #include <linux/string.h>
-#include <linux/kstrto.h>
 #include <linux/sysfs.h>
-#include <linux/soc/qcom/subsystem_restart.h>
+/* 4.19 sdm660 layout: the header lives at include/soc/qcom/, not
+ * include/linux/soc/qcom/. Both of the paths this file used to include
+ * (linux/kstrto.h, linux/soc/qcom/subsystem_restart.h) do not exist in
+ * LKGeek_sdm660, so the module failed at include time and never built. */
+#include <soc/qcom/subsystem_restart.h>
 
 #define MODEM_SUBSYS	"modem"
 #define CLASS_NAME	"modem-boot"
@@ -65,8 +68,6 @@
 
 static struct class *modem_boot_class;
 static struct device *modem_boot_dev;
-static struct attribute_group modem_boot_group;
-
 static void *modem_handle;		/* subsystem_get() handle, NULL until up */
 static char modem_fwname[32] = "modem";
 static int last_err;
@@ -231,9 +232,12 @@ static void __exit modem_boot_exit(void)
 {
 	if (modem_online())
 		subsystem_put(modem_handle);
-	sysfs_remove_group(&modem_boot_dev->kobj, &modem_boot_group);
-	device_unregister(modem_boot_dev);
-	class_destroy(modem_boot_class);
+	if (modem_boot_dev) {
+		sysfs_remove_group(&modem_boot_dev->kobj, &modem_boot_group);
+		device_unregister(modem_boot_dev);
+	}
+	if (modem_boot_class)
+		class_destroy(modem_boot_class);
 }
 
 module_init(modem_boot_init);
