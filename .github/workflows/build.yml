@@ -147,29 +147,62 @@ jobs:
 
       - name: Clone kernel source (with KernelSU submodule)
         run: |
-          # PINNED to 12b01ae978. Two reasons, both on the KERNEL side:
-          # 1) 5e69909e09 (POC idle CPU selector) breaks kernel/sched/fair.c:
+          # Branch: wireguard-linux. History of the old 12b01ae978 pin, kept
+          # because it explains what this branch must satisfy:
+          # 1) 5e69909e09 (POC idle CPU selector) broke kernel/sched/fair.c:
           #    implicit declaration of schedtune_task_boost_rcu_locked.
-          # 2) 12b01ae978 restores module_assert_mutex(), which a bad merge
+          # 2) 12b01ae978 restored module_assert_mutex(), which a bad merge
           #    dropped from kernel/module.c. It is only reachable with
-          #    CONFIG_MODULES=y, so it stayed latent until we started
-          #    building modules -- without it every module build dies on
-          #    kernel/module.c:625. Upstream has a stub for the schedtune
-          #    case in b29788a519, but POC/BORE/ADIOS (1ece735566) also landed
-          #    and are untested here. Pin until the whole 11-08 scheduler
-          #    batch is verified green, then remove.
+          #    CONFIG_MODULES=y, so it stayed latent until we started building
+          #    modules -- without it every module build dies on
+          #    kernel/module.c:625.
+          # VERIFIED 2026-11-12 on wireguard-linux head: kernel/sysctl.c carries
+          # a single 'three' declaration again (the 12b01ae978-era duplicate
+          # that broke the build is gone), kernel/module.c has
+          # module_assert_mutex, and the defconfig ships POC off. The branch
+          # does NOT carry fix-ksu-sugrant's 1c46e3f2 container defconfig, so
+          # the fragment supplies the MEMCG set instead.
           git clone --recurse-submodules \
             https://github.com/DevHamid/LKGeek_sdm660.git kernel
           cd kernel
-          git checkout 12b01ae978
+          git checkout wireguard-linux
           git submodule update --init --recursive
           cd ..
+          echo "kernel HEAD: $(git -C kernel rev-parse --short HEAD) $(git -C kernel log -1 --format=%s)"
           # drivers/kernelsu is a SYMLINK into the KernelSU submodule; a broken
           # symlink makes drivers/Kconfig:242 fail with "can't open file".
           test -f kernel/drivers/kernelsu/Kconfig \
             || { echo "FATAL: drivers/kernelsu/Kconfig missing (submodule fetch failed)"; \
                  ls -la kernel/drivers/kernelsu; exit 1; }
           echo "KernelSU Kconfig present:"; head -5 kernel/drivers/kernelsu/Kconfig
+
+      - name: Inject modem_boot driver into kernel tree
+        run: |
+          cd kernel
+          # modem-boot.c lives in the workflow repo (../modem/modem-boot.c), not
+          # in the kernel tree. Nothing ever compiled it, which is why
+          # /sys/class/modem-boot/ was empty on-device. Drop it into
+          # drivers/soc/qcom and wire a tristate + obj-m so it builds as
+          # modem_boot.ko and lands in modules_install.
+          cp ../modem/modem-boot.c drivers/soc/qcom/modem-boot.c
+          {
+            echo ''
+            echo 'config QCOM_MODEM_BOOT'
+            printf '\ttristate "QCOM modem boot control (wayne / sdm660)"\n'
+            printf '\tdepends on MSM_PIL && MSM_SUBSYSTEM_RESTART\n'
+            printf '\thelp\n'
+            printf '\t  Exposes /sys/class/modem-boot/modem0/{state,boot,restart,fwname}\n'
+            printf '\t  so userspace cold-boots the modem through PIL after rmtfs is\n'
+            printf '\t  answering. Does not boot at load: rmtfs must serve the modem\n'
+            printf '\t  remote-FS requests first or the modem watchdogs itself.\n'
+          } >> drivers/soc/qcom/Kconfig
+          printf '\nobj-$(CONFIG_QCOM_MODEM_BOOT) += modem-boot.o\n' >> drivers/soc/qcom/Makefile
+          # Fragment append is not enough on its own: set the tristate
+          # explicitly so it resolves to =m instead of defaulting off.
+          printf '\nCONFIG_QCOM_MODEM_BOOT=m\n' >> arch/arm64/configs/vendor/wayne-oss-perf_defconfig
+          echo "--- verify wiring ---"
+          grep -n "QCOM_MODEM_BOOT" drivers/soc/qcom/Kconfig drivers/soc/qcom/Makefile arch/arm64/configs/vendor/wayne-oss-perf_defconfig
+          ls -l drivers/soc/qcom/modem-boot.c
 
       - name: Apply OpenWrt config fragment
         run: |
@@ -268,6 +301,16 @@ jobs:
           fi
           ls -lh out/arch/arm64/boot/Image.gz-dtb
           ls out/arch/arm64/boot/dts/vendor/qcom/ | grep -i wayne || echo "WARN: wayne dtb missing"
+          # HARD GATE: modem_boot.ko is the whole point of the injection step.
+          # Kconfig can silently drop a tristate whose deps are unmet, and an
+          # empty /sys/class/modem-boot/ cost us a full device-test cycle once.
+          if [ -f out/drivers/soc/qcom/modem-boot.ko ]; then
+            echo "PASS: modem_boot.ko built ($(stat -c%s out/drivers/soc/qcom/modem-boot.ko) bytes)"
+          else
+            echo "::error::modem_boot.ko NOT built -- check QCOM_MODEM_BOOT in out/.config"
+            grep -E "QCOM_MODEM_BOOT|MSM_PIL|MSM_SUBSYSTEM_RESTART" out/.config || true
+            exit 1
+          fi
 
       - name: Install kernel modules to OpenWrt rootfs
         run: |
