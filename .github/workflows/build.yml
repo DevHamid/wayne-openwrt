@@ -279,6 +279,13 @@ jobs:
           if [ "$rc" -ne 0 ]; then
             grep -E "error:|Error [0-9]|undefined symbol|No rule to make" /tmp/kbuild.log \
               | head -n 12 | while IFS= read -r line; do echo "::error::$line"; done
+            # 'redefinition' errors hide the cause in the "note: previous
+            # definition" line that the grep above drops, and job logs are
+            # 403 for this account. Surface it explicitly.
+            echo "--- previous-definition notes ---"
+            grep -n -B3 -A3 "previous definition" /tmp/kbuild.log | head -n 40 || true
+            echo "--- qcom-spmi-wled context ---"
+            grep -n -B2 -A6 "qcom-spmi-wled" /tmp/kbuild.log | head -n 60 || true
             echo "--- tail ---"
             tail -n 30 /tmp/kbuild.log
             exit "$rc"
