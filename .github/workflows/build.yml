@@ -176,33 +176,17 @@ jobs:
                  ls -la kernel/drivers/kernelsu; exit 1; }
           echo "KernelSU Kconfig present:"; head -5 kernel/drivers/kernelsu/Kconfig
 
-      - name: Inject modem_boot driver into kernel tree
+      - name: Verify modem_boot driver is in the kernel tree
         run: |
           cd kernel
-          # modem-boot.c lives in the workflow repo (../modem/modem-boot.c), not
-          # in the kernel tree. Nothing ever compiled it, which is why
-          # /sys/class/modem-boot/ was empty on-device. Drop it into
-          # drivers/soc/qcom and wire a tristate + obj-m so it builds as
-          # modem_boot.ko and lands in modules_install.
-          cp ../modem/modem-boot.c drivers/soc/qcom/modem-boot.c
-          {
-            echo ''
-            echo 'config QCOM_MODEM_BOOT'
-            printf '\ttristate "QCOM modem boot control (wayne / sdm660)"\n'
-            printf '\tdepends on MSM_PIL && MSM_SUBSYSTEM_RESTART\n'
-            printf '\thelp\n'
-            printf '\t  Exposes /sys/class/modem-boot/modem0/{state,boot,restart,fwname}\n'
-            printf '\t  so userspace cold-boots the modem through PIL after rmtfs is\n'
-            printf '\t  answering. Does not boot at load: rmtfs must serve the modem\n'
-            printf '\t  remote-FS requests first or the modem watchdogs itself.\n'
-          } >> drivers/soc/qcom/Kconfig
-          printf '\nobj-$(CONFIG_QCOM_MODEM_BOOT) += modem-boot.o\n' >> drivers/soc/qcom/Makefile
-          # Fragment append is not enough on its own: set the tristate
-          # explicitly so it resolves to =m instead of defaulting off.
-          printf '\nCONFIG_QCOM_MODEM_BOOT=m\n' >> arch/arm64/configs/vendor/wayne-oss-perf_defconfig
-          echo "--- verify wiring ---"
-          grep -n "QCOM_MODEM_BOOT" drivers/soc/qcom/Kconfig drivers/soc/qcom/Makefile arch/arm64/configs/vendor/wayne-oss-perf_defconfig
-          ls -l drivers/soc/qcom/modem-boot.c
+          # modem_boot now lives ON the kernel branch (wireguard-linux), not in
+          # this repo. Keeping the check: a silent Kconfig drop is what left
+          # /sys/class/modem-boot/ empty on-device for a whole test cycle.
+          for f in drivers/soc/qcom/modem-boot.c; do
+            test -f "$f" || { echo "::error::$f missing from kernel branch"; exit 1; }
+          done
+          grep -n "QCOM_MODEM_BOOT" drivers/soc/qcom/Kconfig drivers/soc/qcom/Makefile \
+            arch/arm64/configs/vendor/wayne-oss-perf_defconfig
 
       - name: Apply OpenWrt config fragment
         run: |
