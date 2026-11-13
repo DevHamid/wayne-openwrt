@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # build-rmtfs.sh — cross-compile a static aarch64 `rmtfs` + `libqrtr`
 #                 for the OpenWrt (musl) rootfs.
 #
