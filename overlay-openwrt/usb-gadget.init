@@ -49,8 +49,15 @@ ensure_usb0_uci() {
 }
 
 start_service() {
-    [ -r /usr/lib/wayne/usb-gadget.sh ] && . /usr/lib/wayne/usb-gadget.sh
-    type usb_gadget_up >/dev/null 2>&1 || return 0
+    # The gadget builder lives either at /usr/lib/wayne/usb-gadget.sh
+    # (persistent layout) or at /usb-gadget.sh (initramfs/legacy layout).
+    # Source whichever exists so procd always builds the USB gadget.
+    if [ -r /usr/lib/wayne/usb-gadget.sh ]; then
+        . /usr/lib/wayne/usb-gadget.sh
+    elif [ -r /usb-gadget.sh ]; then
+        . /usb-gadget.sh
+    fi
+    type usb_gadget_up >/dev/null 2>&1 || { logger -t usb-gadget "usb_gadget_up not found"; return 0; }
     usb_gadget_up
     [ -e /sys/class/net/usb0 ] || return 0
 
