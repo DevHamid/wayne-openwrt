@@ -1,0 +1,51 @@
+#!/bin/sh /etc/rc.common
+# modem-boot-trigger — boot the wayne (Mi 6X / sdm660) modem via PIL
+#
+# Depends on rmtfs service (modem/rmtfs, START=95). That service mounts
+# the firmware partition, wires /lib/firmware, symlinks the rmtfs uio
+# node, and starts the rmtfs daemon under procd. We run AFTER it (START=97)
+# and only pull the cold-boot trigger once rmtfs is actually answering, or
+# the modem watchdogs at MBA handoff (looks like a firmware fault; it is a
+# sequencing fault).
+#
+# The modem-boot kernel driver does NOT boot the modem at module load. This
+# trigger is the single cold-boot point.
+
+START=97
+STOP=03
+
+boot_modem() {
+	# Load the modem-boot module if not already present.
+	if [ ! -e /sys/class/modem-boot/modem0/boot ]; then
+		modprobe modem-boot 2>/dev/null || {
+			logger -t modem-boot "modprobe modem-boot failed"
+			return 1
+		}
+	fi
+
+	# rmtfs must be alive and answering before the modem boots. Wait up to
+	# 30s for the daemon (procd respawn may still be starting it).
+	local i=0
+	while ! pgrep -f '/usr/bin/rmtfs' >/dev/null 2>&1 && [ "$i" -lt 30 ]; do
+		sleep 1
+		i=$((i+1))
+	done
+	if ! pgrep -f '/usr/bin/rmtfs' >/dev/null 2>&1; then
+		logger -t modem-boot "rmtfs daemon not running after 30s"
+		return 1
+	fi
+
+	# Single cold-boot trigger.
+	echo 1 > /sys/class/modem-boot/modem0/boot 2>/dev/null
+	logger -t modem-boot "modem boot triggered"
+}
+
+start() {
+	boot_modem
+}
+
+stop() {
+	# Kernel tears the modem down when the subsystem driver unloads; we do
+	# not take it down on shutdown.
+	:
+}
