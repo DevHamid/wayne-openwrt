@@ -32,10 +32,13 @@ DL(){ wget -q -O "$1" "$2" || curl -fsSL -o "$1" "$2"; }
 echo "[*] fetching musl aarch64 cross toolchain"
 TC="$WORK/toolchain"
 mkdir -p "$TC"
-DL "$WORK/tc.tgz" https://musl.cc/aarch64-linux-musl-cross.tgz
-tar -C "$TC" -xzf "$WORK/tc.tgz"
-CC="$TC/aarch64-linux-musl-cross/bin/aarch64-linux-musl-gcc"
-AR="$TC/aarch64-linux-musl-cross/bin/aarch64-linux-musl-ar"
+# GitHub-hosted (musl.cc is unreachable from GH Actions runners).
+DL "$WORK/tc.tar.xz" \
+	https://github.com/userdocs/qbt-musl-cross-make/releases/download/2646/x86_64-aarch64-linux-musl.tar.xz
+tar -C "$TC" -xJf "$WORK/tc.tar.xz"
+CC="$TC/aarch64-linux-musl/bin/aarch64-linux-musl-gcc"
+AR="$TC/aarch64-linux-musl/bin/aarch64-linux-musl-ar"
+"$CC" --version | head -1
 
 mkdir -p "$OUT_DIR"
 
