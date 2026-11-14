@@ -568,6 +568,35 @@ jobs:
           chmod +x tc/busybox
           readelf -h tc/busybox | grep 'Machine:.*AArch64'
 
+      - name: Download wifi userspace packages (aarch64_generic feed)
+        run: |
+          set -euo pipefail
+          BASE=https://downloads.immortalwrt.org/releases/23.05.4/packages/aarch64_generic/base
+          mkdir -p pkgs
+          cd pkgs
+          for p in \
+            wpad-basic-mbedtls_2023-09-08-e5ccbfc6-8 \
+            hostapd-common_2023-09-08-e5ccbfc6-8 \
+            iw_5.19-1 \
+            libnl-tiny1_2023-07-27-bc92a280-1 \
+            libubus20230605_2023-06-05-f787c97b-2 \
+            libubox20230523_2023-05-23-75a3b870-1 \
+            libblobmsg-json20230523_2023-05-23-75a3b870-1 \
+            libjson-c5_0.16-3 \
+            libmbedtls12_2.28.10-1 \
+            libucode20230711_2024-07-11-1a8a0bcf-4 \
+            ucode_2024-07-11-1a8a0bcf-4 \
+            ucode-mod-fs_2024-07-11-1a8a0bcf-4 \
+            ucode-mod-nl80211_2024-07-11-1a8a0bcf-4 \
+            ucode-mod-rtnl_2024-07-11-1a8a0bcf-4 \
+            ucode-mod-ubus_2024-07-11-1a8a0bcf-4 \
+            ucode-mod-uloop_2024-07-11-1a8a0bcf-4 \
+            ; do
+            pkg="${p}_aarch64_generic.ipk"
+            wget -q "$BASE/$pkg" -O "$pkg" || { echo "WARN: $pkg fetch failed"; }
+          done
+          ls -lh
+
       - name: Assemble 23.05 initramfs (identical overlay + packer path)
         run: |
           set -euo pipefail
@@ -580,6 +609,24 @@ jobs:
           # no ttyGS0 line, so without this the acm serial console never spawns
           # a login (picocom opens the port but gets no prompt).
           echo 'ttyGS0::askfirst:/usr/libexec/login.sh' >> etc/inittab
+          # --- WiFi: extract userspace packages (hostapd+wpad+iw). ---
+          mkdir -p ../../pkg-out
+          for ipk in ../../pkgs/*.ipk; do
+            [ -e "$ipk" ] || continue
+            tar -xzf "$ipk" -C ../../pkg-out ./data.tar.gz 2>/dev/null || true
+            tar -xzf ../../pkg-out/data.tar.gz -C . 2>/dev/null || true
+          done
+          # --- WiFi: stage WCN3990 firmware (MBN + BDF) at driver paths. ---
+          cp ../../scripts/stage-wifi-fw.sh ./stage-wifi-fw.sh
+          chmod +x ./stage-wifi-fw.sh
+          ./stage-wifi-fw.sh ../../modem-firmware . || echo "WARN: wifi fw staging failed"
+          # --- WiFi: up-check diagnostic. ---
+          mkdir -p root
+          cp ../../scripts/wifi-diag.sh root/wifi-diag.sh
+          chmod +x root/wifi-diag.sh
+          # --- WiFi: UCI default (AP config on first boot). ---
+          cp ../../overlay-openwrt/etc/uci-defaults/91-wifi-ap etc/uci-defaults/91-wifi-ap
+          chmod +x etc/uci-defaults/91-wifi-ap
           # 23.05 dropbear config ships 'option Interface lan'. On 23.05 this
           # interface filter binds nowhere (bridge state/name differs) -> port
           # 22 refused even though usb0 is up and DHCP works. Drop the filter
