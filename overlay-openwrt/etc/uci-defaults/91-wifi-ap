@@ -1,0 +1,63 @@
+#!/bin/sh
+# /etc/uci-defaults/91-wifi-ap -- runs once on first boot, then deletes itself.
+#
+# Goal: bring the WCN3990 (qcacld via icnss/PIL) up as an access point so we
+# can debug the board over SSH/wifi instead of picocom. This script is written
+# to be *idempotent and forgiving*: if the wlan driver/PIL never came up (no
+# phy), it does nothing and exits 0 -- the rest of the system still boots.
+#
+# IMPORTANT (2026-11-14): on the vendor 4.19 tree the wlan PHY only appears if
+# (a) the icnss/QMI PIL loaded WLANMDSP.MBN into the wlan-msa region AND
+# (b) qcacld grabbed the right BDF. If there is no phy, `iw dev` finds nothing
+# and hostapd has no interface. That is a firmware/PIL problem, not a config
+# problem -- see /root/wifi-diag.sh for the diagnostic.
+
+# --- 1. Find a wireless phy, if any. ---
+PHY=$(ls /sys/class/ieee80211/ 2>/dev/null | head -1)
+if [ -z "$PHY" ]; then
+    logger -t wifi-ap "no wlan phy found (icnss/PIL or BDF not up) -- skipping AP config"
+    exit 0
+fi
+logger -t wifi-ap "wlan phy found: $PHY"
+
+# --- 2. Let OpenWrt's config_generate have already made radio0 + wifi-iface
+#           when the phy appeared. We only set the AP-relevant knobs. ---
+RADIO=$(uci -q get wireless.radio0 2>/dev/null)
+if [ -z "$RADIO" ]; then
+    # No radio0 yet. config_generate usually makes it if a phy was present at
+    # first boot, but on this vendor tree phy may probe late. Create it now.
+    uci set wireless.radio0=wifi-device
+    uci set wireless.radio0.type='mac80211'
+    uci set wireless.radio0.phy="$PHY"
+    uci set wireless.radio0.channel='6'
+    uci set wireless.radio0.htmode='HT20'
+    uci set wireless.radio0.disabled='0'
+    uci set wireless.radio0.legacy_rates='1'
+fi
+
+# --- 3. The wifi-iface: AP mode, open (debug), fixed SSID. ---
+uci -q delete wireless.@wifi-iface[0]
+uci set wireless.default_radio0=wifi-iface
+uci set wireless.default_radio0.device='radio0'
+uci set wireless.default_radio0.mode='ap'
+uci set wireless.default_radio0.ssid='wayne-ap'
+uci set wireless.default_radio0.encryption='none'
+uci set wireless.default_radio0.network='lan'
+uci set wireless.default_radio0.disabled='0'
+
+uci commit wireless
+
+# --- 4. Put radio0 in the lan zone (firewall) so clients aren't dropped. ---
+if uci -q get firewall.@zone[0].network >/dev/null 2>&1; then
+    uci -q delete firewall.@zone[0].network
+    uci add_list firewall.@zone[0].network='usb0'
+    uci add_list firewall.@zone[0].network='wlan0'
+    uci commit firewall
+fi
+
+# --- 5. Bring the radio up. ---
+wifi up radio0 >/dev/null 2>&1
+/etc/init.d/firewall restart >/dev/null 2>&1
+logger -t wifi-ap "AP configured: ssid=wayne-ap"
+
+exit 0
