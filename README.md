@@ -50,7 +50,7 @@ YOU ARE HERE
   - **Customization** — opkg feeds, themes, extra services. No dockerman: M7 answered NO (Docker lives on the mainline track).
   - Also: Hermes agent port, firewall/NAT zones (lan/usb0/wan).
   *Done when:* Wayne routes + serves (webui up, wifi + modem probed with YES/NO evidence) with config surviving reboot.
-- **M9★ — Polish + recovery-flashable ROM → v1.0.** Baked-in root password, RTC/NTP at boot, thermal/charging, USB reconnect watchdog. **The actual finish = flashable OpenWrt ROM for TWRP/OrangeFox**: recovery zip (`updater-script`/`update-binary`) writing boot image + rootfs to p64 with the 5 p64-only guards. *Done when:* zip flashed from OrangeFox → phone boots → SSH works → tag `v1.0`.
+- **M9★ — Polish + recovery-flashable ROM → v1.0.** Baked-in root password, RTC/NTP at boot, thermal/charging, USB reconnect watchdog. **The actual finish = flashable OpenWrt ROM for TWRP/OrangeFox**: recovery zip (`updater-script`/`update-binary`) dd's the boot image (kernel + tiny system-bootstrap initramfs) to the boot partition and installs the OpenWrt rootfs to the **system** partition (ext4); config/overlay persists on userdata via the rootfs fstab. Rationale (2026-11-14): the boot partition is 32 MiB and a full-OS initramfs already eats ~22 MB of it — initramfs-in-boot is a test vehicle, not the product shape. CI builds the zip every run; tag releases attach it (see "How it works"). *Done when:* zip flashed from OrangeFox → phone boots → SSH works → tag `v1.0`.
 
 ### 🔮 Future track (parked, post-v1.0)
 
@@ -93,6 +93,9 @@ Two boot images are produced per build:
 | `bisect-kernel.img` | OUR kernel + DONOR's Android ramdisk | Splits kernel vs initramfs faults: boots Android → kernel fine; loops → kernel at fault. |
 | `bisect-initramfs.img` | DONOR kernel + OUR debug initramfs | Splits the other way: loops → initramfs at fault; stuck-on-logo → PID 1 alive but invisible. |
 | `installer-boot.img` | kernel + installer ramdisk | Installs persistent rootfs to `mmcblk0p64` (userdata, ext4). **The only partition ever written.** 5 safety guards. |
+| `rom-boot.img` | kernel + tiny system-bootstrap ramdisk (~0.7 MB, ~15 MB total) | **The ROM's boot image.** Bootstrap mounts the system partition (PARTNAME=system, ext4) and switch_roots into the installed OpenWrt. No `root=` on the cmdline. |
+
+**Release artifact: `wayne-openwrt-rom.zip`** — the TWRP/OrangeFox flashable ROM (M9 structure): `boot/boot.img` = `rom-boot.img`, `system/rootfs.tar.gz` = the OpenWrt rootfs, `META-INF` update-binary formats system ext4, extracts the rootfs there and dd's boot. Built by CI on every run and attached to tag releases.
 
 ## Boot failure troubleshooting (no console on this hardware)
 

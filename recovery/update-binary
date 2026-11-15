@@ -1,0 +1,121 @@
+#!/sbin/sh
+# update-binary for the wayne OpenWrt M9 ROM (TWRP / OrangeFox compatible).
+# Protocol: update-binary <v3> <fd> <zipfile>
+# Exit 0 = success. Every step logs a marker to the recovery log for diagnosis.
+
+VERSION=$1
+OUTFD=$2
+ZIPFILE=$3
+
+step() { echo "M9: $*" >&2; }
+ui_print() {
+    echo "ui_print $*" >&$OUTFD
+    echo "ui_print" >&$OUTFD
+}
+
+ui_print "wayne OpenWrt M9 ROM installer"
+step "start version=$VERSION zip=$ZIPFILE pwd=$(pwd)"
+[ "$VERSION" = "3" ] || step "WARNING protocol $VERSION (expected 3)"
+
+# --- helpers ---------------------------------------------------------------
+find_part() { # $1=name -> echo device
+    local want=$1 dev n
+    for dev in /dev/block/by-name/* /dev/block/bootdevice/by-name/* \
+               /dev/block/platform/*/by-name/* /dev/block/platform/soc/*/by-name/*; do
+        [ -e "$dev" ] || continue
+        [ "$(basename "$dev")" = "$want" ] && { echo "$dev"; return; }
+    done
+    for dev in /sys/class/block/mmcblk0p*; do
+        [ -d "$dev" ] || continue
+        n=$(sed -n 's/^PARTNAME=//p' "$dev/uevent" 2>/dev/null)
+        [ "$n" = "$want" ] && { echo "/dev/$(basename "$dev")"; return; }
+    done
+    # size fallback for mmcblk0
+    for dev in /dev/block/mmcblk0p*; do
+        [ -b "$dev" ] || continue
+        n=$(cat "/sys/class/block/$(basename "$dev")/size" 2>/dev/null)
+        case "$want:$n" in
+            boot:65536)   { echo "$dev"; return; } ;;
+            system:6210107) { echo "$dev"; return; } ;;
+        esac
+    done
+}
+
+extract_from_zip() { # $1=entry path $2=destdir
+    local entry=$1 dest=$2
+    mkdir -p "$dest"
+    if [ -n "$ZIPFILE" ] && [ -f "$ZIPFILE" ]; then
+        if command -v unzip >/dev/null 2>&1; then
+            unzip -o "$ZIPFILE" "$entry" -d "$dest" >/dev/null 2>&1
+        elif command -v busybox >/dev/null 2>&1; then
+            busybox unzip -o "$ZIPFILE" "$entry" -d "$dest" >/dev/null 2>&1
+        fi
+    fi
+    # fallback: recovery may already have extracted the zip in cwd or /tmp
+    if [ ! -e "$dest/$entry" ] && [ -e "$entry" ]; then
+        cp -a "$entry" "$dest/$entry" 2>/dev/null
+    fi
+    [ -e "$dest/$entry" ]
+}
+
+# --- 1. locate partitions ----------------------------------------------------
+SYSTEM=$(find_part system)
+BOOT=$(find_part boot)
+ui_print "system: ${SYSTEM:-NOT FOUND}"
+ui_print "boot:   ${BOOT:-NOT FOUND}"
+step "system=$SYSTEM boot=$BOOT"
+[ -n "$SYSTEM" ] || { ui_print "FATAL: system partition not found"; exit 1; }
+[ -n "$BOOT" ]   || { ui_print "FATAL: boot partition not found";   exit 1; }
+
+# --- 2. choose mkfs ----------------------------------------------------------
+MKFS=
+for c in mkfs.ext4 mke2fs make_ext4fs; do
+    if command -v "$c" >/dev/null 2>&1 || [ -x "/sbin/$c" ] || [ -x "/system/bin/$c" ]; then
+        MKFS=$c; break
+    fi
+done
+step "mkfs=$MKFS"
+[ -n "$MKFS" ] || { ui_print "FATAL: no mkfs (mkfs.ext4/mke2fs/make_ext4fs)"; exit 1; }
+
+# --- 3. format system (destructive) -------------------------------------------
+ui_print "Formatting $SYSTEM ext4 (Android system lost)"
+step "mkfs $MKFS on $SYSTEM"
+case "$MKFS" in
+    mkfs.ext4)   "$MKFS" -F -L wayne-system "$SYSTEM" || { ui_print "FATAL: mkfs failed"; exit 1; } ;;
+    mke2fs)      "$MKFS" -F -t ext4 -L wayne-system "$SYSTEM" || { ui_print "FATAL: mke2fs failed"; exit 1; } ;;
+    make_ext4fs) "$MKFS" -l 6G -L wayne-system "$SYSTEM" || { ui_print "FATAL: make_ext4fs failed"; exit 1; } ;;
+esac
+ui_print "system formatted"
+
+mkdir -p /tmp/mnt_system
+mount "$SYSTEM" /tmp/mnt_system 2>/dev/null || \
+mount -t ext4 "$SYSTEM" /tmp/mnt_system || { ui_print "FATAL: mount system failed"; exit 1; }
+step "system mounted"
+
+# --- 4. extract rootfs tarball ----------------------------------------------
+ui_print "Extracting OpenWrt rootfs"
+rm -rf /tmp/x; mkdir -p /tmp/x
+extract_from_zip system/rootfs.tar.gz /tmp/x || { ui_print "FATAL: cannot extract system/rootfs.tar.gz"; exit 1; }
+step "rootfs tar extracted"
+tar -xzf /tmp/x/system/rootfs.tar.gz -C /tmp/mnt_system 2>/dev/null || \
+tar -xzf /tmp/x/system/rootfs.tar.gz -C /tmp/mnt_system || { ui_print "FATAL: rootfs extract failed"; exit 1; }
+sync
+[ -e /tmp/mnt_system/sbin/init ] || {
+    ui_print "FATAL: rootfs missing /sbin/init"
+    umount /tmp/mnt_system
+    exit 1
+}
+ui_print "rootfs installed to system"
+step "rootfs in place"
+umount /tmp/mnt_system
+
+# --- 5. flash boot (kernel + bootstrap) ---------------------------------------
+ui_print "Flashing boot image"
+extract_from_zip boot/boot.img /tmp/x || { ui_print "FATAL: cannot extract boot/boot.img"; exit 1; }
+step "boot img size $(stat -c%s /tmp/x/boot/boot.img 2>/dev/null)"
+dd if=/tmp/x/boot/boot.img of="$BOOT" bs=4k 2>/dev/null || { ui_print "FATAL: boot flash failed"; exit 1; }
+sync
+step "boot flashed"
+
+ui_print "Done. Kernel on boot; OS on system. Reboot."
+exit 0

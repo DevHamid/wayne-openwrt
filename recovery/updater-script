@@ -1,0 +1,3 @@
+# wayne OpenWrt M9 ROM — updater-script (compat stub)
+# Install logic is in update-binary (POSIX shell). Recovery runs update-binary.
+ui_print("wayne OpenWrt M9 ROM");

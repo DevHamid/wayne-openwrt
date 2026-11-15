@@ -469,6 +469,60 @@ jobs:
             build/installer-initramfs.cpio.gz
           ls -lh build/installer-boot.img
 
+      - name: Assemble system-bootstrap initramfs (ROM bootstrap)
+        run: |
+          # v1.0 ROM shape (user decision 2026-11-14): the boot partition (32 MiB)
+          # carries ONLY the kernel + this tiny static bootstrap; the OpenWrt
+          # rootfs is installed to the SYSTEM partition by the recovery zip.
+          # The bootstrap mounts PARTNAME=system ext4 and switch_roots into it.
+          # Applet set and layout mirror the on-device-proven M9 bootstrap.
+          mkdir -p build/bootstrap/bin build/bootstrap/dev build/bootstrap/proc build/bootstrap/sys build/bootstrap/tmp build/bootstrap/etc build/bootstrap/mnt
+          cp tc/busybox build/bootstrap/bin/busybox-static
+          chmod +x build/bootstrap/bin/busybox-static
+          for applet in sh basename cat date echo grep ln ls mkdir mknod mount rm sed sleep switch_root umount; do
+            ln -sf busybox-static build/bootstrap/bin/$applet
+          done
+          cp overlay-system/init build/bootstrap/init
+          chmod +x build/bootstrap/init
+          cp overlay-common/usb-gadget.sh build/bootstrap/usb-gadget.sh
+          chmod +x build/bootstrap/usb-gadget.sh
+          (cd build/bootstrap && find . -print0 | cpio --null -o --format=newc 2>/dev/null | gzip -9 > ../bootstrap-initramfs.cpio.gz)
+          ls -lh build/bootstrap-initramfs.cpio.gz
+
+      - name: Pack ROM boot image (kernel + system bootstrap)
+        run: |
+          # Plain packer: donor header + cmdline VERBATIM. No root= argument --
+          # an appended root= made the kernel mount the target before /init ran
+          # and panic (v0.9.4 finding; see installer step notes).
+          python3 scripts/pack-boot.py mkboot donor-boot.img \
+            kernel/out/arch/arm64/boot/Image.gz-dtb \
+            build/bootstrap-initramfs.cpio.gz build/rom-boot.img
+          python3 scripts/check-pack.py mkboot donor-boot.img \
+            kernel/out/arch/arm64/boot/Image.gz-dtb \
+            build/bootstrap-initramfs.cpio.gz
+          ls -lh build/rom-boot.img
+
+      - name: Assemble flashable ROM zip (rootfs -> system partition)
+        run: |
+          # THE v1.0 deliverable: TWRP/OrangeFox zip (M9 structure).
+          # update-binary formats the SYSTEM partition ext4, extracts
+          # system/rootfs.tar.gz there, and dd's boot/boot.img (kernel +
+          # bootstrap) to the boot partition. Config/packages persist on
+          # userdata via the rootfs fstab (/overlay). OrangeFox (p59) untouched.
+          mkdir -p build/rom/boot build/rom/system build/rom/META-INF/com/google/android
+          cp build/rom-boot.img build/rom/boot/boot.img
+          tar -czf build/rom/system/rootfs.tar.gz \
+            --exclude=./proc --exclude=./sys --exclude=./dev --exclude=./tmp \
+            --exclude=./mnt --exclude=./init --exclude=./rom --exclude=./usb-gadget.sh \
+            -C build/openwrt .
+          tar -tzf build/rom/system/rootfs.tar.gz | grep -q '^./sbin/init$' \
+            || { echo "::error::rootfs.tar.gz missing ./sbin/init"; exit 1; }
+          cp recovery/update-binary  build/rom/META-INF/com/google/android/update-binary
+          cp recovery/updater-script build/rom/META-INF/com/google/android/updater-script
+          (cd build/rom && zip -qr ../wayne-openwrt-rom.zip .)
+          ls -lh build/wayne-openwrt-rom.zip
+          unzip -l build/wayne-openwrt-rom.zip
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -485,6 +539,9 @@ jobs:
             build/installer-boot.img
             build/installer-initramfs.cpio.gz
             kernel/out/arch/arm64/boot/Image.gz-dtb
+            build/rom-boot.img
+            build/bootstrap-initramfs.cpio.gz
+            build/wayne-openwrt-rom.zip
 
       # ---- v0.9.3 OTG HARD GATE (deliberately runs AFTER the upload) --------
       # The config-dump step above only PRINTS "FAIL:" -- it never exits, so a
@@ -747,6 +804,7 @@ jobs:
           # into out/ — a single flat glob is what the release step uploads.
           mkdir -p out
           find dist -type f -name '*.img' -exec cp -v {} out/ \;
+          find dist -type f -name 'wayne-openwrt-rom*.zip' -exec cp -v {} out/ \;
           echo "--- release assets ---"
           ls -l out/
 
@@ -762,7 +820,7 @@ jobs:
               body = text[m.start(): nxt.start() if nxt else len(text)].strip()
           else:
               body = text.strip()
-          body += "\n\n---\nBoot images are attached below (no install needed: `fastboot boot <image>`).\n"
+          body += "\n\n---\n**Attached: `wayne-openwrt-rom.zip` — the TWRP/OrangeFox flashable ROM.** Installs OpenWrt to the system partition; system + userdata are wiped (keep a boot backup for rollback). The raw .img files are for `fastboot boot` testing only.\n"
           pathlib.Path('release-notes.md').write_text(body)
           print(body[:400])
           PYEOF
@@ -772,5 +830,7 @@ jobs:
         with:
           name: ${{ github.ref_name }}
           body_path: release-notes.md
-          files: out/*.img
+          files: |
+            out/*.img
+            out/*.zip
           fail_on_unmatched_files: true
