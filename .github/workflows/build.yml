@@ -509,6 +509,54 @@ jobs:
             build/bootstrap-initramfs.cpio.gz
           ls -lh build/rom-boot.img
 
+      - name: Stage modem+wifi firmware & wifi userspace into ROM rootfs
+        run: |
+          set -euo pipefail
+          # ROM-only extras. Runs AFTER the initramfs re-pack, so the RAM-only
+          # boot images stay small; only system/rootfs.tar.gz carries these.
+          ROOTFS="$GITHUB_WORKSPACE/build/openwrt"
+          # --- Modem: full firmware dump -> /lib/firmware. PIL probes mba.mbn,
+          #     modem.mdt + .bNN there; the dump also carries WLANMDSP, ADSP...
+          mkdir -p "$ROOTFS/lib/firmware"
+          cp -a modem-firmware/. "$ROOTFS/lib/firmware/"
+          # PIL probes lowercase names on a case-sensitive rootfs; the dump is
+          # uppercase -- add lowercase copies of the modem boot chain.
+          for f in "$ROOTFS"/lib/firmware/MBA.MBN "$ROOTFS"/lib/firmware/MODEM.MDT \
+                   "$ROOTFS"/lib/firmware/MODEM.B??; do
+              [ -e "$f" ] && cp "$f" "$ROOTFS/lib/firmware/$(basename "$f" | tr 'A-Z' 'a-z')"
+          done
+          # --- WiFi: WCN3990 WLANMDSP.MBN + BDWLAN BDFs at qcacld probe paths.
+          ./scripts/stage-wifi-fw.sh modem-firmware "$ROOTFS" \
+            || echo "WARN: wifi fw staging failed"
+          # --- WiFi userspace from the 21.02.7 aarch64_generic feed.
+          # wpad-basic-wolfssl pulls hostapd-common + libwolfssl; iw for checks.
+          # libubus/libubox already ship in the 21.02 rootfs -- not re-staged.
+          BASE=https://downloads.immortalwrt.org/releases/21.02.7/packages/aarch64_generic/base
+          mkdir -p wlan-pkgs wlan-x
+          for p in \
+            wpad-basic-wolfssl_2022-07-29-b704dc72-12_aarch64_generic.ipk \
+            hostapd-common_2022-07-29-b704dc72-12_aarch64_generic.ipk \
+            libnl-tiny2022-05-17_2022-05-17-b5b2ba09-1_aarch64_generic.ipk \
+            libwolfssl5.6.3.e624513f_5.6.3-stable-1_aarch64_generic.ipk \
+            iw_5.19-1_aarch64_generic.ipk \
+            ; do
+            wget -q "$BASE/$p" -O "wlan-pkgs/$p"
+            tar -xzf "wlan-pkgs/$p" -C wlan-x ./data.tar.gz 2>/dev/null || true
+            tar -xzf wlan-x/data.tar.gz -C "$ROOTFS" 2>/dev/null || true
+          done
+          # --- WiFi: AP uci-defaults (idempotent/forgiving -- see the file).
+          mkdir -p "$ROOTFS/etc/uci-defaults"
+          cp overlay-openwrt/etc/uci-defaults/91-wifi-ap "$ROOTFS/etc/uci-defaults/91-wifi-ap"
+          chmod +x "$ROOTFS/etc/uci-defaults/91-wifi-ap"
+          # --- hard gate: the ROM rootfs must carry the radio pieces ---
+          { [ -f "$ROOTFS/usr/sbin/hostapd" ] || [ -f "$ROOTFS/usr/bin/hostapd" ]; } \
+            || { echo "::error::hostapd missing from ROM rootfs"; exit 1; }
+          [ -f "$ROOTFS/lib/firmware/wlan/qca_cld/wlanmdsp.mbn" ] \
+            || { echo "::error::wlan firmware missing from ROM rootfs"; exit 1; }
+          [ -f "$ROOTFS/lib/firmware/modem.mdt" ] \
+            || { echo "::error::modem firmware missing from ROM rootfs"; exit 1; }
+          echo "ROM rootfs: modem fw + wifi fw + wpad/iw staged"
+
       - name: Assemble flashable ROM zip (rootfs -> system partition)
         run: |
           # THE v1.0 deliverable: TWRP/OrangeFox zip (M9 structure).
