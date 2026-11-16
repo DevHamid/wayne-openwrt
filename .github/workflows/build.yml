@@ -195,7 +195,11 @@ jobs:
           git clone --recurse-submodules \
             https://github.com/DevHamid/LKGeek_sdm660.git kernel
           cd kernel
-          git checkout wireguard-linux
+          # 2026-11-15 (user decision): build from the adios-wayne branch --
+          # the user's stable line (ADIOS I/O scheduler, MGLRU in its FIXED
+          # form per the user; KSU+SUSFS, modem-boot driver, wayne DTS all
+          # verified present on this branch). Replaces wireguard-linux.
+          git checkout adios-wayne
           git submodule update --init --recursive
           cd ..
           echo "kernel HEAD: $(git -C kernel rev-parse --short HEAD) $(git -C kernel log -1 --format=%s)"
