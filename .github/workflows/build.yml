@@ -177,39 +177,14 @@ jobs:
 
       - name: Clone kernel source (with KernelSU submodule)
         run: |
-          # Branch: wireguard-linux. History of the old 12b01ae978 pin, kept
-          # because it explains what this branch must satisfy:
-          # 1) 5e69909e09 (POC idle CPU selector) broke kernel/sched/fair.c:
-          #    implicit declaration of schedtune_task_boost_rcu_locked.
-          # 2) 12b01ae978 restored module_assert_mutex(), which a bad merge
-          #    dropped from kernel/module.c. It is only reachable with
-          #    CONFIG_MODULES=y, so it stayed latent until we started building
-          #    modules -- without it every module build dies on
-          #    kernel/module.c:625.
-          # VERIFIED 2026-11-12 on wireguard-linux head: kernel/sysctl.c carries
-          # a single 'three' declaration again (the 12b01ae978-era duplicate
-          # that broke the build is gone), kernel/module.c has
-          # module_assert_mutex, and the defconfig ships POC off. The branch
-          # does NOT carry fix-ksu-sugrant's 1c46e3f2 container defconfig, so
-          # the fragment supplies the MEMCG set instead.
-          git clone --recurse-submodules \
+          # User-selected stable base. Record the resolved branch tip so each
+          # artifact remains traceable even when adios-wayne advances.
+          git clone --branch adios-wayne --single-branch --recurse-submodules \
             https://github.com/DevHamid/LKGeek_sdm660.git kernel
-          cd kernel
-          # 2026-11-15 (regression root-cause): every device-proven kernel
-          # (v0.9.4 -> v0.9.12, Oct) was built from build-all-rekernel, whose
-          # tip has been a1e6b3a since 2026-09-25 (compare: identical). The
-          # Nov-08 pins (869a08ebbb / 12b01ae978) and the Nov-12 switch to
-          # wireguard-linux and the 2026-11-15 adios-wayne test all come from
-          # the scheduler-batch lineage (POC/BORE/ADIOS + MGLRU drift), and
-          # EVERY one of those kernels failed to boot on the device (v0.9.13
-          # zip flash-OK/no-boot, v0.9.14 + openwrt-boot.img no boot). Until
-          # that lineage is bisected, we ship the exact source that worked:
-          # pin a1e6b3a. Its defconfig already carries MSM_PIL=y +
-          # MSM_PIL_MSS_QDSP6V5=y + MSM_SUBSYSTEM_RESTART=y (modem stack ok).
-          git checkout a1e6b3a
-          git submodule update --init --recursive
-          cd ..
-          echo "kernel HEAD: $(git -C kernel rev-parse --short HEAD) $(git -C kernel log -1 --format=%s)"
+          mkdir -p build
+          git -C kernel log -1 --format='%H %s' > build/kernel-source.txt
+          git -C kernel submodule status --recursive >> build/kernel-source.txt
+          cat build/kernel-source.txt
           # drivers/kernelsu is a SYMLINK into the KernelSU submodule; a broken
           # symlink makes drivers/Kconfig:242 fail with "can't open file".
           test -f kernel/drivers/kernelsu/Kconfig \
@@ -217,50 +192,17 @@ jobs:
                  ls -la kernel/drivers/kernelsu; exit 1; }
           echo "KernelSU Kconfig present:"; head -5 kernel/drivers/kernelsu/Kconfig
 
-      - name: Inject modem_boot driver from repo (pinned tree lacks it)
+      - name: Verify branch-native modem_boot driver
         run: |
           cd kernel
-          # The a1e6b3a pin predates the Nov-12 commit that moved modem_boot
-          # ONTO the wireguard-linux branch. Restore the in-repo injection
-          # (modem/modem-boot.c) so cellular bring-up survives the pin.
-          # Idempotent: safe even if the tree ever gains the driver natively.
-          cp ../modem/modem-boot.c drivers/soc/qcom/modem-boot.c
-          grep -q "config QCOM_MODEM_BOOT" drivers/soc/qcom/Kconfig || \
-            cat >> drivers/soc/qcom/Kconfig <<'EOF'
-
-          config QCOM_MODEM_BOOT
-            tristate "wayne modem boot control (PIL subsystem driver)"
-            depends on ARCH_QCOM
-            help
-              Boots the SDM660 modem via the PIL subsystem stack. Required for
-              cellular bring-up on wayne (Mi 6X). Say M if unsure.
-          EOF
-          grep -q "modem-boot.o" drivers/soc/qcom/Makefile || \
-            echo 'obj-$(CONFIG_QCOM_MODEM_BOOT) += modem-boot.o' >> drivers/soc/qcom/Makefile
-          grep -q "CONFIG_QCOM_MODEM_BOOT" arch/arm64/configs/vendor/wayne-oss-perf_defconfig || \
-            echo "CONFIG_QCOM_MODEM_BOOT=m" >> arch/arm64/configs/vendor/wayne-oss-perf_defconfig
-          # The a1e6b3a tree lost module_assert_mutex() in a bad merge (it is
-          # restored on 12b01ae978, which is NOT our pin). Its single call at
-          # kernel/module.c:625 only activates with CONFIG_MODULES=y (needed
-          # for modem_boot.ko) -> implicit-declaration error.
-          # scripts/kcompat-*.patch also carries:
-          #   - kcompat-wled-inline-stub.patch: the same "latent until
-          #     modules" pattern in include/linux/leds-qpnp-flash.h -- a
-          #     static inline wled_flash_led_prepare() stub collides with the
-          #     real definition in drivers/video/backlight/qcom-spmi-wled.c
-          #     once the driver is compiled as [M] (CONFIG_BACKLIGHT_QCOM_
-          #     SPMI_WLED=m leaves the #ifdef false). Nothing calls the stub
-          #     (only leds-qpnp-flash-v2.c includes the header and it does
-          #     not call this symbol), so the stub is removed, the real
-          #     definition + EXPORT_SYMBOL stay.
-          for p in ../scripts/kcompat-*.patch; do
-            git apply --check "$p" || { echo "::error::compat patch failed --check: $p"; exit 1; }
-            git apply "$p"
-          done
-          grep -n "static void module_assert_mutex(void)" kernel/module.c
-          grep -n "QCOM_MODEM_BOOT\|modem-boot" drivers/soc/qcom/Kconfig \
-            drivers/soc/qcom/Makefile arch/arm64/configs/vendor/wayne-oss-perf_defconfig \
-            || { echo "::error::modem_boot injection failed"; exit 1; }
+          test -f drivers/soc/qcom/modem-boot.c
+          grep -q '^config QCOM_MODEM_BOOT$' drivers/soc/qcom/Kconfig
+          grep -Fq 'obj-$(CONFIG_QCOM_MODEM_BOOT) += modem-boot.o' drivers/soc/qcom/Makefile
+          grep -q '^CONFIG_QCOM_MODEM_BOOT=m$' arch/arm64/configs/vendor/wayne-oss-perf_defconfig
+          test -f arch/arm64/boot/dts/vendor/qcom/sdm660-mtp-wayne.dts
+          # adios-wayne already carries module_assert_mutex and the WLED
+          # module guard fix. The old a1e6b3a compat patches do not apply.
+          echo 'PASS: branch-native modem driver, build wiring, and wayne DTS present'
 
       - name: Apply OpenWrt config fragment
         run: |
@@ -652,6 +594,9 @@ jobs:
             build/rom-boot.img
             build/bootstrap-initramfs.cpio.gz
             build/wayne-openwrt-rom.zip
+            build/kernel-source.txt
+            kernel/out/.config
+          include-hidden-files: true
 
       # ---- v0.9.3 OTG HARD GATE (deliberately runs AFTER the upload) --------
       # The config-dump step above only PRINTS "FAIL:" -- it never exits, so a
