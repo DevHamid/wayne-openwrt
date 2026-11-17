@@ -195,11 +195,18 @@ jobs:
           git clone --recurse-submodules \
             https://github.com/DevHamid/LKGeek_sdm660.git kernel
           cd kernel
-          # 2026-11-15 (user decision): build from the adios-wayne branch --
-          # the user's stable line (ADIOS I/O scheduler, MGLRU in its FIXED
-          # form per the user; KSU+SUSFS, modem-boot driver, wayne DTS all
-          # verified present on this branch). Replaces wireguard-linux.
-          git checkout adios-wayne
+          # 2026-11-15 (regression root-cause): every device-proven kernel
+          # (v0.9.4 -> v0.9.12, Oct) was built from build-all-rekernel, whose
+          # tip has been a1e6b3a since 2026-09-25 (compare: identical). The
+          # Nov-08 pins (869a08ebbb / 12b01ae978) and the Nov-12 switch to
+          # wireguard-linux and the 2026-11-15 adios-wayne test all come from
+          # the scheduler-batch lineage (POC/BORE/ADIOS + MGLRU drift), and
+          # EVERY one of those kernels failed to boot on the device (v0.9.13
+          # zip flash-OK/no-boot, v0.9.14 + openwrt-boot.img no boot). Until
+          # that lineage is bisected, we ship the exact source that worked:
+          # pin a1e6b3a. Its defconfig already carries MSM_PIL=y +
+          # MSM_PIL_MSS_QDSP6V5=y + MSM_SUBSYSTEM_RESTART=y (modem stack ok).
+          git checkout a1e6b3a
           git submodule update --init --recursive
           cd ..
           echo "kernel HEAD: $(git -C kernel rev-parse --short HEAD) $(git -C kernel log -1 --format=%s)"
@@ -210,17 +217,31 @@ jobs:
                  ls -la kernel/drivers/kernelsu; exit 1; }
           echo "KernelSU Kconfig present:"; head -5 kernel/drivers/kernelsu/Kconfig
 
-      - name: Verify modem_boot driver is in the kernel tree
+      - name: Inject modem_boot driver from repo (pinned tree lacks it)
         run: |
           cd kernel
-          # modem_boot now lives ON the kernel branch (wireguard-linux), not in
-          # this repo. Keeping the check: a silent Kconfig drop is what left
-          # /sys/class/modem-boot/ empty on-device for a whole test cycle.
-          for f in drivers/soc/qcom/modem-boot.c; do
-            test -f "$f" || { echo "::error::$f missing from kernel branch"; exit 1; }
-          done
-          grep -n "QCOM_MODEM_BOOT" drivers/soc/qcom/Kconfig drivers/soc/qcom/Makefile \
-            arch/arm64/configs/vendor/wayne-oss-perf_defconfig
+          # The a1e6b3a pin predates the Nov-12 commit that moved modem_boot
+          # ONTO the wireguard-linux branch. Restore the in-repo injection
+          # (modem/modem-boot.c) so cellular bring-up survives the pin.
+          # Idempotent: safe even if the tree ever gains the driver natively.
+          cp ../modem/modem-boot.c drivers/soc/qcom/modem-boot.c
+          grep -q "config QCOM_MODEM_BOOT" drivers/soc/qcom/Kconfig || \
+            cat >> drivers/soc/qcom/Kconfig <<'EOF'
+
+          config QCOM_MODEM_BOOT
+            tristate "wayne modem boot control (PIL subsystem driver)"
+            depends on ARCH_QCOM
+            help
+              Boots the SDM660 modem via the PIL subsystem stack. Required for
+              cellular bring-up on wayne (Mi 6X). Say M if unsure.
+          EOF
+          grep -q "modem-boot.o" drivers/soc/qcom/Makefile || \
+            echo 'obj-$(CONFIG_QCOM_MODEM_BOOT) += modem-boot.o' >> drivers/soc/qcom/Makefile
+          grep -q "CONFIG_QCOM_MODEM_BOOT" arch/arm64/configs/vendor/wayne-oss-perf_defconfig || \
+            echo "CONFIG_QCOM_MODEM_BOOT=m" >> arch/arm64/configs/vendor/wayne-oss-perf_defconfig
+          grep -n "QCOM_MODEM_BOOT\|modem-boot" drivers/soc/qcom/Kconfig \
+            drivers/soc/qcom/Makefile arch/arm64/configs/vendor/wayne-oss-perf_defconfig \
+            || { echo "::error::modem_boot injection failed"; exit 1; }
 
       - name: Apply OpenWrt config fragment
         run: |
