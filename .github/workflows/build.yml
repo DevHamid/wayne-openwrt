@@ -242,12 +242,21 @@ jobs:
           # The a1e6b3a tree lost module_assert_mutex() in a bad merge (it is
           # restored on 12b01ae978, which is NOT our pin). Its single call at
           # kernel/module.c:625 only activates with CONFIG_MODULES=y (needed
-          # for modem_boot.ko) -> implicit-declaration error. scripts/
-          # kcompat-module-assert-mutex.patch re-adds the exact 12b01ae978
-          # definition and is verified against a1e6b3a's module.c.
-          git apply --check ../scripts/kcompat-module-assert-mutex.patch \
-            || { echo "::error::compat patch failed --check"; exit 1; }
-          git apply ../scripts/kcompat-module-assert-mutex.patch
+          # for modem_boot.ko) -> implicit-declaration error.
+          # scripts/kcompat-*.patch also carries:
+          #   - kcompat-wled-inline-stub.patch: the same "latent until
+          #     modules" pattern in include/linux/leds-qpnp-flash.h -- a
+          #     static inline wled_flash_led_prepare() stub collides with the
+          #     real definition in drivers/video/backlight/qcom-spmi-wled.c
+          #     once the driver is compiled as [M] (CONFIG_BACKLIGHT_QCOM_
+          #     SPMI_WLED=m leaves the #ifdef false). Nothing calls the stub
+          #     (only leds-qpnp-flash-v2.c includes the header and it does
+          #     not call this symbol), so the stub is removed, the real
+          #     definition + EXPORT_SYMBOL stay.
+          for p in ../scripts/kcompat-*.patch; do
+            git apply --check "$p" || { echo "::error::compat patch failed --check: $p"; exit 1; }
+            git apply "$p"
+          done
           grep -n "static void module_assert_mutex(void)" kernel/module.c
           grep -n "QCOM_MODEM_BOOT\|modem-boot" drivers/soc/qcom/Kconfig \
             drivers/soc/qcom/Makefile arch/arm64/configs/vendor/wayne-oss-perf_defconfig \
