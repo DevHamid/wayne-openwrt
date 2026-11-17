@@ -535,8 +535,19 @@ jobs:
           done
           cp overlay-system/init build/bootstrap/init
           chmod +x build/bootstrap/init
-          cp overlay-common/usb-gadget.sh build/bootstrap/usb-gadget.sh
-          chmod +x build/bootstrap/usb-gadget.sh
+          # Keep gadget setup compatible with the bootstrap BusyBox applet set.
+          python3 - <<'PYEOF'
+          import re
+          from pathlib import Path
+          lines = Path('overlay-common/usb-gadget.sh').read_text().splitlines()
+          commands = re.compile(r'(?<![A-Za-z0-9_])(head|mountpoint|modprobe|lsmod|tr)(?![A-Za-z0-9_])')
+          offenders = [f'{n}: {line.strip()}' for n, line in enumerate(lines, 1)
+                       if not line.lstrip().startswith('#') and commands.search(line)]
+          if offenders:
+              raise SystemExit('::error::USB gadget script uses unavailable bootstrap applets: ' + '; '.join(offenders))
+          assert any('for u in /sys/class/udc/*' in line for line in lines), 'UDC enumeration must not depend on unavailable pipeline applets'
+          print('PASS: USB gadget script uses no unavailable bootstrap applets')
+          PYEOF
           (cd build/bootstrap && find . -print0 | cpio --null -o --format=newc 2>/dev/null | gzip -9 > ../bootstrap-initramfs.cpio.gz)
           ls -lh build/bootstrap-initramfs.cpio.gz
 

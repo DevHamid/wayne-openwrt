@@ -99,14 +99,15 @@ Two boot images are produced per build:
 
 **Release artifact: `wayne-openwrt-rom.zip`** — the TWRP/OrangeFox flashable ROM (M9 structure): `boot/boot.img` = `rom-boot.img`, `system/rootfs.tar.gz` = the OpenWrt rootfs, `META-INF` update-binary formats system ext4, extracts the rootfs there and dd's boot. Built by CI on every run and attached to tag releases.
 
-## Boot failure troubleshooting (no console on this hardware)
+## Boot failure troubleshooting
 
 This kernel has no framebuffer console (`CONFIG_VT=n`), so a working boot can look like "stuck on Mi logo". Distinguish failure modes:
 
 | Symptom | Meaning | Next step |
 |---|---|---|
 | Bootloop (logo reappears) | Reset observed — kernel panic, watchdog, or bootloader rejection. NOT proven to be a panic. | Try the donor-control image |
-| Stuck on logo, no loop | Inconclusive — headless boot looks identical | Check USB serial on a PC |
+| No host `/dev/ttyACM0` at 30 seconds | Inconclusive. Bootstrap may wait up to 60 seconds for a UDC; absence does not prove kernel death or failed rootfs handoff. | Capture from power-on through startup; use kernel/serial logs if available |
+| `openwrt-boot.img` fails | Does not exercise the system-partition rootfs install/mount path | Diagnose its kernel + initramfs independently |
 
 ## Build
 

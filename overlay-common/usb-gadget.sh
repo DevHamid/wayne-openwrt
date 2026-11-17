@@ -12,17 +12,22 @@ log() {
 usb_gadget_up() {
     log "START"
     # 1) Ensure sysfs/configfs are up
-    mountpoint -q /sys/kernel/config 2>/dev/null || mount -t configfs none /sys/kernel/config 2>/dev/null
-    log "configfs mount=$(mountpoint -q /sys/kernel/config && echo ok || echo FAIL)"
+    mkdir -p /sys/kernel/config
+    grep -q ' /sys/kernel/config configfs ' /proc/mounts || mount -t configfs none /sys/kernel/config 2>/dev/null
+    grep -q ' /sys/kernel/config configfs ' /proc/mounts && log "configfs mount=ok" || log "configfs mount=FAIL"
 
     # 2) Load libcomposite (provides USB function drivers in configfs)
-    modprobe libcomposite 2>/dev/null
-    log "libcomposite=$(lsmod | grep -q libcomposite && echo loaded || echo no)"
+    # CONFIG_USB_LIBCOMPOSITE=y in the resolved kernel config; no module load is needed.
+    log "libcomposite is built into the kernel"
 
     # 3) Wait for UDC to appear (cold boot can be slow)
     n=0; UDC=""
     while [ $n -lt 60 ] && [ -z "$UDC" ]; do
-        UDC=$(ls /sys/class/udc/ 2>/dev/null | head -1)
+        for u in /sys/class/udc/*; do
+            [ -e "$u" ] || continue
+            UDC=${u##*/}
+            break
+        done
         [ -n "$UDC" ] && break
         sleep 1; n=$((n+1))
     done
@@ -69,9 +74,9 @@ usb_gadget_up() {
     # 6) Bind
     if ! echo "$UDC" > "$G/UDC" 2>/dev/null; then
         log "FAIL bind $UDC (errno=$?); diagnostics:"
-        log "  gadget dirs: $(ls /sys/kernel/config/usb_gadget/ 2>/dev/null | tr '\n' ' ')"
+        log "  gadget dirs: $(ls /sys/kernel/config/usb_gadget/ 2>/dev/null)"
         log "  udc state: $(cat /sys/class/udc/$UDC/function 2>/dev/null || echo none) $(cat /sys/class/udc/$UDC/state 2>/dev/null)"
-        log "  loaded usb mods: $(lsmod | grep -i 'usb\|rndis\|gadget' | tr '\n' ';')"
+        log "  UDC entries: $(ls /sys/class/udc/ 2>/dev/null)"
         return 1
     fi
     log "bound to $UDC"
