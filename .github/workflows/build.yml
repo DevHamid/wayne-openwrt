@@ -239,6 +239,16 @@ jobs:
             echo 'obj-$(CONFIG_QCOM_MODEM_BOOT) += modem-boot.o' >> drivers/soc/qcom/Makefile
           grep -q "CONFIG_QCOM_MODEM_BOOT" arch/arm64/configs/vendor/wayne-oss-perf_defconfig || \
             echo "CONFIG_QCOM_MODEM_BOOT=m" >> arch/arm64/configs/vendor/wayne-oss-perf_defconfig
+          # The a1e6b3a tree lost module_assert_mutex() in a bad merge (it is
+          # restored on 12b01ae978, which is NOT our pin). Its single call at
+          # kernel/module.c:625 only activates with CONFIG_MODULES=y (needed
+          # for modem_boot.ko) -> implicit-declaration error. scripts/
+          # kcompat-module-assert-mutex.patch re-adds the exact 12b01ae978
+          # definition and is verified against a1e6b3a's module.c.
+          git apply --check ../scripts/kcompat-module-assert-mutex.patch \
+            || { echo "::error::compat patch failed --check"; exit 1; }
+          git apply ../scripts/kcompat-module-assert-mutex.patch
+          grep -n "static void module_assert_mutex(void)" kernel/module.c
           grep -n "QCOM_MODEM_BOOT\|modem-boot" drivers/soc/qcom/Kconfig \
             drivers/soc/qcom/Makefile arch/arm64/configs/vendor/wayne-oss-perf_defconfig \
             || { echo "::error::modem_boot injection failed"; exit 1; }

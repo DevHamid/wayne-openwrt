@@ -168,9 +168,26 @@ CONFIG_USB_ACM=y
 # MGLRU's per-memcg reclaim paths (get_lruvec, get_mm_list,
 # mem_cgroup_page_lruvec) are all #ifdef CONFIG_MEMCG guarded. MEMCG_KMEM is a
 # hidden bool with 'default y' under MEMCG, pulled in automatically.
-CONFIG_MEMCG=y
-CONFIG_MEMCG_SWAP=y
-CONFIG_MEMCG_SWAP_ENABLED=y
+# Memory resource control (cgroup v1, subsystem hierarchy)
+# ----------------------------------------------------------
+# MEMCG is OFF in this fragment since 2026-11-17 and that is a HARD COMPILE
+# FACT, not a preference. Evidence (twice, same tree family):
+#   1) v0.9.11-rc2 (2026-10-18): MEMCG=y on the vendor tree died with 7
+#      errors -- mm/vmscan.c:210/227/237/239/609/659/665 "use of undeclared
+#      identifier 'shrinker_rwsem'" (M7=NO verdict).
+#   2) run 43988866035 (2026-11-17): the a1e6b3a pin (build-all-rekernel tip,
+#      the exact tree the October device-proven kernels came from) failed
+#      with the IDENTICAL 7 errors when this fragment's MEMCG met the
+#      fragment's MODULES=y (needed for modem_boot.ko).
+# Root cause: the 5.x shrinker_rwsem rename exists in this 4.19 tree only on
+# fix-ksu-sugrant (commit 1c46e3f2); a1e6b3a never got it and MEMCG activates
+# the code paths that use the symbol.
+# Fix path (documented, NOT a TODO): move the kernel pin to fix-ksu-sugrant,
+# or port the rwsem patch onto the pin, BEFORE re-enabling MEMCG. Re-adding
+# these lines against a1e6b3a will red the build. CGROUP_DEVICE/FREEZER/
+# PIDS/SCHED above stay ON: they compile green WITHOUT MEMCG (on-device
+# verified in v0.9.10).
+# CONFIG_MEMCG is not set
 CONFIG_CGROUP_DEVICE=y
 CONFIG_CGROUP_FREEZER=y
 CONFIG_CGROUP_PIDS=y
