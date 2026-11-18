@@ -57,10 +57,11 @@ jobs:
           ./scripts/patch-procd-sdk.sh sdk
           cd sdk
           make defconfig
-          grep -Eq '^CONFIG_PACKAGE_procd-ujail=y' .config || {
-            printf '\\nCONFIG_PACKAGE_procd-ujail=y\\n' >> .config
+          if ! grep -q '^CONFIG_PACKAGE_procd-ujail=y$' .config; then
+            printf '\nCONFIG_PACKAGE_procd-ujail=y\n' >> .config
             make defconfig
-          }
+          fi
+          grep -q '^CONFIG_PACKAGE_procd-ujail=y$' .config
           make package/system/procd/download V=s
           make package/system/procd/prepare V=s
           SRC=$(find build_dir -path '*/procd-*/jail/capabilities.c' -print -quit)

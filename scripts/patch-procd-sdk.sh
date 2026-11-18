@@ -1,23 +1,19 @@
 #!/bin/sh
-# Apply the capability compatibility patch to the source tree selected by the SDK.
+# Stage the verified compatibility patch in the SDK's source package patch directory.
 set -eu
 SDK=${1:?usage: patch-procd-sdk.sh SDK-DIR}
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-SRC=$(find "$SDK/feeds" "$SDK/package" -path '*/procd*/jail/capabilities.c' -type f -print -quit 2>/dev/null || true)
-[ -n "$SRC" ] || { echo 'procd jail/capabilities.c not found in SDK' >&2; exit 1; }
-PATCH="$ROOT/patches/procd-ujail-kernel-cap-limit.patch"
-if grep -q 'kernel does not support capability' "$SRC"; then
-    grep -q 'PR_CAPBSET_READ(%d) failed' "$SRC"
-    grep -q 'kernel does not support ambient capability' "$SRC"
-    echo "already patched: $SRC"
-    exit 0
-fi
-REL=${SRC#"$SDK/"}
-PATCHDIR="$SDK/package/system/procd/patches"
+RECIPE=$(find "$SDK/feeds" "$SDK/package" -path '*/system/procd/Makefile' -type f -print -quit 2>/dev/null || true)
+[ -n "$RECIPE" ] || { echo 'procd package recipe not found in SDK feeds/package' >&2; exit 1; }
+PATCHDIR="$(dirname "$RECIPE")/patches"
 mkdir -p "$PATCHDIR"
-# Keep the patch in the standard recipe patch directory so SDK prepare/compile
-# applies it deterministically to the pinned source revision.
-cp "$PATCH" "$PATCHDIR/950-ujail-runtime-cap-last.patch"
-# Verify apply against the exact checked-out source without modifying tracked source.
-patch --dry-run -p1 -d "$SDK/feeds/base/system/procd" < "$PATCHDIR/950-ujail-runtime-cap-last.patch"
-echo "verified SDK patch for $REL"
+# Bump package release so the corrected jailer cannot be confused with the
+# stock binary already present in the base rootfs.
+if grep -q '^PKG_RELEASE:=1$' "$RECIPE"; then
+    sed -i 's/^PKG_RELEASE:=1$/PKG_RELEASE:=2/' "$RECIPE"
+fi
+grep -q '^PKG_RELEASE:=2$' "$RECIPE" || { echo 'unexpected procd package release' >&2; exit 1; }
+cp "$ROOT/patches/procd-ujail-kernel-cap-limit.patch" "$PATCHDIR/950-ujail-kernel-cap-limit.patch"
+# Verify recipe-visible patch path; SDK prepare will apply it to the pinned source.
+test -s "$PATCHDIR/950-ujail-kernel-cap-limit.patch"
+echo "staged $(basename "$PATCHDIR/950-ujail-kernel-cap-limit.patch") into $(dirname "$RECIPE")"
