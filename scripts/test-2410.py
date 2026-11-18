@@ -37,6 +37,33 @@ class ConsoleTests(unittest.TestCase):
             self.assertTrue(first.startswith(b'::sysinit:/etc/init.d/rcS S boot\n'))
 
 
+class BootstrapTests(unittest.TestCase):
+    def test_bootstrap_fails_closed_before_switch_root(self):
+        init = (BASE / 'overlay-system/init').read_text()
+        self.assertIn('bootstrap_fatal()', init)
+        self.assertIn('bootstrap_fatal "system partition not found', init)
+        self.assertIn('bootstrap_fatal "mount $MNT failed', init)
+        self.assertIn('bootstrap_fatal "$MNT has no /sbin/init', init)
+        self.assertIn('bootstrap_fatal "switch_root returned', init)
+        self.assertIn('switch_root "$MNT" /sbin/init', init)
+        self.assertNotIn('exec switch_root "$MNT" /sbin/init', init)
+
+    def test_bootstrap_bundles_gadget_helper(self):
+        workflow = (BASE / '.github/workflows/build.yml').read_text()
+        self.assertIn(
+            'cp overlay-common/usb-gadget.sh build/bootstrap/usb-gadget.sh',
+            workflow,
+        )
+
+    def test_bootstrap_starts_usb_gadget_without_blocking_system_lookup(self):
+        init = (BASE / 'overlay-system/init').read_text()
+        start = init.index('USB gadget setup started')
+        locate = init.index('locating system partition')
+        self.assertLess(start, locate)
+        gadget = init[init.index('if [ -r /usb-gadget.sh ]'):locate]
+        self.assertRegex(gadget, r'\) >/dev/null 2>&1 &')
+
+
 class ModemServiceTests(unittest.TestCase):
     def test_existing_automount_image_layout_and_readonly_procd(self):
         with tempfile.TemporaryDirectory() as temp:

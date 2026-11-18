@@ -477,6 +477,8 @@ jobs:
           done
           cp overlay-system/init build/bootstrap/init
           chmod +x build/bootstrap/init
+          cp overlay-common/usb-gadget.sh build/bootstrap/usb-gadget.sh
+          chmod +x build/bootstrap/usb-gadget.sh
           # Keep gadget setup compatible with the bootstrap BusyBox applet set.
           python3 - <<'PYEOF'
           import re

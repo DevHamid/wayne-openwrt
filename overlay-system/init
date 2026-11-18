@@ -3,7 +3,7 @@
 #
 # This replaces the OS-carrying initramfs. The boot partition now holds ONLY
 # the kernel (14.9MB) plus this tiny static bootstrap. It does one job:
-#   mount the system partition (p61) read-only, then switch_root into it.
+#   mount the system partition (p61), then switch_root into it.
 # OpenWrt's procd (/sbin/init) then owns the real root. Writable config/
 # packages live on /overlay -> userdata (p64) via the rootfs fstab.
 #
@@ -16,26 +16,42 @@
 # panics "Requested init /init failed" with no output. A static shell cannot.
 
 mount -t devtmpfs devtmpfs /dev      2>/dev/null
-mount -t proc     proc     /proc
-mount -t sysfs    sysfs    /sys
-mount -t devpts   devpts   /dev/pts  2>/dev/null
-mount -t tmpfs    tmpfs    /tmp       2>/dev/null
 
 [ -e /dev/console ] || mknod -m 600 /dev/console c 5 1
 [ -e /dev/null    ] || mknod -m 666 /dev/null    c 1 3
 
-echo "bootstrap: M9 /init reached PID 1"
+bootstrap_fatal() {
+    echo "bootstrap: FATAL -- $*" > /dev/console
+    echo "bootstrap: rescue shell; system handoff stopped" > /dev/console
+    while true; do
+        [ -e /dev/ttyGS0 ] && /bin/sh < /dev/ttyGS0 > /dev/ttyGS0 2>&1 || /bin/sh
+        echo "bootstrap: rescue shell exited -- respawning" > /dev/console
+        sleep 1
+    done
+}
 
-# --- 1. USB gadget (console + ethernet) for diagnostics ---------------------
+echo "bootstrap: M9 /init reached PID 1" > /dev/console
+
+mount -t proc proc /proc 2>/dev/null || bootstrap_fatal "mount proc failed"
+mount -t sysfs sysfs /sys 2>/dev/null || bootstrap_fatal "mount sysfs failed"
+mount -t devpts devpts /dev/pts 2>/dev/null || \
+    echo "bootstrap: WARNING mount devpts failed" > /dev/console
+mount -t tmpfs tmpfs /tmp 2>/dev/null || \
+    echo "bootstrap: WARNING mount tmpfs failed" > /dev/console
+
+# --- 1. Start USB gadget setup asynchronously for diagnostics ---------------
 if [ -r /usb-gadget.sh ]; then
-    . /usb-gadget.sh
-    usb_gadget_up && echo "bootstrap: USB gadget up (ttyGS0 + usb0)" || \
-        echo "bootstrap: WARNING usb_gadget_up failed" > /dev/console
+    (
+        . /usb-gadget.sh
+        usb_gadget_up
+    ) >/dev/null 2>&1 &
+    echo "bootstrap: USB gadget setup started (pid=$!)" > /dev/console
 else
     echo "bootstrap: WARNING /usb-gadget.sh missing" > /dev/console
 fi
 
 # --- 2. Locate the system partition by PARTNAME (not fixed p#) -------------
+echo "bootstrap: locating system partition (PARTNAME=system)" > /dev/console
 TARGET=
 for p in /sys/class/block/mmcblk0p*; do
     n=$(sed -n 's/^PARTNAME=//p' "$p/uevent" 2>/dev/null)
@@ -45,41 +61,30 @@ for p in /sys/class/block/mmcblk0p*; do
         break
     fi
 done
-[ -n "$TARGET" ] || {
-    echo "bootstrap: FATAL -- system partition not found (PARTNAME=system)" > /dev/console
-    TARGET=
-}
-[ -n "$TARGET" ] && [ -b "$TARGET" ] || {
-    echo "bootstrap: FATAL -- $TARGET is not a block device" > /dev/console
-    TARGET=
-}
+[ -n "$TARGET" ] || bootstrap_fatal "system partition not found (PARTNAME=system)"
+[ -b "$TARGET" ] || bootstrap_fatal "$TARGET is not a block device"
 
-echo "bootstrap: system partition is $TARGET"
+echo "bootstrap: system partition is $TARGET" > /dev/console
 
-# --- 3. Mount system read-only --------------------------------------------
+# --- 3. Mount system -------------------------------------------------------
 MNT=/mnt/system
 mkdir -p "$MNT"
-if [ -n "$TARGET" ]; then
-    mount -t ext4 "$TARGET" "$MNT" 2>/dev/null || \
-        echo "bootstrap: FATAL -- mount $MNT failed (system not formatted ext4?)" > /dev/console
-    [ -e "$MNT/sbin/init" ] || \
-        echo "bootstrap: FATAL -- $MNT has no /sbin/init" > /dev/console
-fi
+mount -t ext4 "$TARGET" "$MNT" 2>/dev/null || \
+    bootstrap_fatal "mount $MNT failed (system not formatted ext4?)"
+[ -e "$MNT/sbin/init" ] || bootstrap_fatal "$MNT has no /sbin/init"
+
+echo "bootstrap: system mounted; /sbin/init present" > /dev/console
 
 # --- 4. Hand off (mount --move + switch_root, same as installer) -----------
 mkdir -p "$MNT/dev" "$MNT/proc" "$MNT/sys" "$MNT/tmp"
-mount --move /dev  "$MNT/dev"   2>/dev/null
-mount --move /proc "$MNT/proc"   2>/dev/null
-mount --move /sys  "$MNT/sys"   2>/dev/null
-mount --move /tmp  "$MNT/tmp"   2>/dev/null
+mount --move /dev  "$MNT/dev"   2>/dev/null || bootstrap_fatal "move /dev failed"
+mount --move /proc "$MNT/proc"  2>/dev/null || bootstrap_fatal "move /proc failed"
+mount --move /sys  "$MNT/sys"   2>/dev/null || bootstrap_fatal "move /sys failed"
+mount --move /tmp  "$MNT/tmp"   2>/dev/null || bootstrap_fatal "move /tmp failed"
 
-echo "bootstrap: exec switch_root -> $MNT /sbin/init"
-exec switch_root "$MNT" /sbin/init
+echo "bootstrap: switch_root -> $MNT /sbin/init" > /dev/console
+switch_root "$MNT" /sbin/init
 
-# --- 5. PID 1 must never die --- rescue shell ----------------------------------
-echo "bootstrap: FATAL -- switch_root returned; dropping to rescue shell" > /dev/console
-while true; do
-    [ -e /dev/ttyGS0 ] && /bin/sh < /dev/ttyGS0 > /dev/ttyGS0 2>&1 || /bin/sh
-    echo "(rescue shell exited -- respawning)" > /dev/console
-    sleep 1
-done
+# switch_root should not return. Keep this as a separate fail-closed guard in
+# case the target init exits before replacing PID 1.
+bootstrap_fatal "switch_root returned"

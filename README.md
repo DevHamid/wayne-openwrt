@@ -1,19 +1,36 @@
 # OpenWrt on Xiaomi Mi 6X (wayne)
 
-**Booting a full [ImmortalWrt](https://downloads.immortalwrt.org/) (OpenWrt fork) on the Xiaomi Mi 6X (wayne, SDM660) — on the stock vendor kernel `4.19.325-LKGeek-perf-devhamid`.**
+**Booting a full [ImmortalWrt](https://downloads.immortalwrt.org/) (OpenWrt fork) on the Xiaomi Mi 6X (wayne, SDM660) — on the stock/vendor Linux 4.19 kernel tree.**
 
 **Vision / definition of done:** phone = pocket modem + services box, finished entirely on vendor kernel 4.19 + OpenWrt 21.02. **The finish line = a flashable OpenWrt ROM installable from TWRP/OrangeFox (recovery zip) — no PC, no fastboot.** Mainline kernel + OpenWrt 25/newest are a *future* track after v1.0 (mainline still buggy: partial modem, broken power management — moving now would break more than it fixes).
 
+## Current status (2026-11-18)
+
+The work is now **structure-first**. We are not treating the full-initramfs image as the product; it remains a RAM/test vehicle. The product path is:
+
+```text
+OrangeFox/TWRP recovery zip
+  ├─ boot.img              = kernel + tiny static system-bootstrap initramfs
+  ├─ system/                = ext4 OpenWrt rootfs (rootfs.tar.gz extracted here)
+  └─ userdata/              = persistent config/overlay, selected by rootfs fstab
+```
+
+- **Latest CI:** run `44397558231`, commit `d266292`, passed. It built the capability-compatible `procd-ujail` package through the pinned 24.10 SDK feed.
+- **Current device:** 24.10.4 shell and SSH are working. The installed image identifies source run `44151039361` / repository commit `23fa4291`; it still contains the older `procd`/`ujail` binary, so the latest CI fix is **not deployed on the phone yet**.
+- **Current Wi-Fi evidence:** the vendor WLAN/ICNSS driver probes during kernel boot, but `/sys/class/ieee80211` is empty and no Wi-Fi PHY exists. The repeated `PR_CAPBSET_DROP(38)` error is real on this image (`cap_last_cap=37`), but the ujail deployment must be tested before using the userspace failure as a Wi-Fi conclusion.
+- **Local M8-S2/S3 work in progress:** the system bootstrap now has explicit fail-closed paths for system lookup, ext4 mount, `/sbin/init`, mount moves, and `switch_root`; USB gadget setup is started asynchronously so its UDC wait cannot delay system discovery. The build now bundles the helper. Regression checks pass locally; this change is **not yet built by CI or tested on Wayne**.
+- **Safety boundary:** the current checks changed nothing on the phone. No EFS/calibration data, partition, or boot image is touched by the debugging path.
+
 ## Roadmap (interactive blueprint)
 
-**Overall progress: ██████████░░░░░░░░░ ≈ 60%** — M1–M6 done, M7 closed NO, M8 in flight (v0.9.11-rc2).
+**Overall state:** M1–M7 closed; M8 active; M9 structure frozen but runtime handoff still pending.
 
 ```
 YOU ARE HERE
     ▼
-[M1✅][M2✅][M3✅][M4✅][M5✅][M6✅][M7✅][M8  ][M9★ ][FUT ]
- kernel  RAM   root  boot  SSH   host  dock✗ 21svc zip   mainline later
-                                              = finish: OrangeFox-flashable ROM
+[M1✅][M2✅][M3✅][M4✅][M5✅][M6✅][M7✅][M8▶ ][M9★ ][FUT ]
+ kernel  RAM   root  boot  SSH   host  dock✗ structure  ROM  mainline
+                                                  = finish: v1.0
 ```
 
 ### ✅ Done
@@ -30,7 +47,15 @@ YOU ARE HERE
 
 - **M5:** ONE configfs gadget (`g1`) = ACM serial (`ttyGS0`↔`ttyACM0`) + RNDIS ethernet (`usb0`↔PC). DHCP + dropbear → `ssh root@192.168.42.1`. Dropbear duplicate-`Interface` bug fixed (normalize to single `usb0` each boot). *Closeout:* flash v0.9.6 installer-boot → zero-touch SSH; re-test on a good USB port (PC port 3-1.2 is a bad Acer hub, not the phone).
 
-### 🔜 Next
+### 🔜 Next — structure-first execution
+
+1. **Ship the split product shape, not another full-initramfs product image.** Keep the boot partition small: kernel plus static bootstrap only. Keep the complete OpenWrt rootfs in `system`.
+2. **Make the bootstrap observable.** It must emit markers for gadget setup, partition discovery, ext4 mount, `/sbin/init` validation, and `switch_root`; on failure it must stop in a rescue loop instead of attempting a blind handoff.
+3. **Deploy the CI-built ujail compatibility package in the next debug image.** Re-read the installed package version and `/sbin/ujail` hash, then verify that the `PR_CAPBSET_DROP(38)` loop is gone or reduced to a non-fatal compatibility message.
+4. **Only then continue Wi-Fi bring-up in gates:** userspace startup → firmware/BDF discovery → ICNSS/QMI readiness → PHY registration → scan → AP/client test. An empty PHY is not declared fixed by installing a userspace package.
+5. **Validate the recovery zip as a separate experiment:** extraction to `system`, boot image contents, mount/handoff markers, and rollback path. Do not use a successful recovery extraction as proof that the next boot reached OpenWrt.
+
+#### Historical closeout notes
 
 - **M6 — USB OTG host mode (pocket modem). ✅ CLOSED 2026-10-17.** dwc3 as HOST: tethered phone USB → Wayne WAN → NAT. **PROVEN:** PC unplugged → `reg75=enabled`, `extcon4 USB-HOST=1`, xHCI → hub (1a40:0801) → SanDisk Ultra (0781:5590) as `sda` with `sda1 sda2` FAT parsed + Logitech receiver as HID mouse. **ROOT CAUSE:** external VBUS (`VOLTAGE_NOW=5019531`) back-feeds the port; PM660 `BOOST_BACK_WA` (`wa_flags=0x72`) refuses to boost → `softstart TIMEOUT rc=-22` on all 4 currents. Unplug → first-try success. Kernel correct as-is (`mode_store` already sets `vbus_active=false` + ID-ground); v0.9.7 DT supply + v0.9.8 non-fatal were both required. **Rule: host mode is standalone-only** — PC console and source role cannot share the port. Remaining work is M6b (below), not the core. Historical investigation: Single UDC = device XOR host; tear the gadget down cleanly; NEVER unbind dwc3 (panics this kernel).
   - **Lever (found 2026-10-15):** `/sys/devices/platform/soc/a800000.ssusb/mode` = the role switch (`peripheral`|`host`). No `usb_role_switch` class on 4.19; extcon0..4 exist but are read-only notifications. PD phy extcon `USB=1` confirms cable presence.
@@ -43,19 +68,16 @@ YOU ARE HERE
   - **Kernel audit 2026-10-17 (v0.9.10).** The vendor defconfig already had `CGROUPS`, `CGROUP_SCHED`, `CGROUP_CPUACCT`, `NAMESPACES`, `NET_NS`, `OVERLAY_FS`, `BRIDGE`, `NF_NAT`, `NETFILTER_XT_TARGET_MASQUERADE`. Missing and now added to the fragment: `MEMCG`, `MEMCG_SWAP`, `CGROUP_DEVICE`, `CGROUP_FREEZER`, `CGROUP_PIDS`, `VETH`, `BRIDGE_NETFILTER`. Without `MEMCG` dockerd aborts with "kernel does not support memory limit capabilities"; without `VETH` containers get no network. `USER_NS` stays OFF (vendor default) — dockerd does not need it, only rootless mode does.
   - **Probe shipped (v0.9.10):** `scripts/m7-docker-probe.sh` → `/root/m7.sh`. One line: `sh /root/m7.sh`. It reads `/proc/cgroups`, mounts memory/freezer/pids/devices, opens a fresh net namespace (`unshare -n`), does a REAL overlay mount with copy-up write on the actual root filesystem, creates a veth pair + bridge, and pushes a MASQUERADE rule. Verdict line: `M7=YES` / `M7=DEGRADED` / `M7=NO`. Log: `/root/m7.log`. Read-only apart from temp objects it deletes; touches no USB, display or partition.
   - **Still unknown until booted:** whether `overlay2` works on this f2fs/ext4 rootfs, whether dockerd starts under 4.19 without a seccomp profile fight, and real memory headroom (3 GB RAM, OpenWrt base is ~50 MB). Those are answered by the probe, not by reading config.
-- **M8 — Full OpenWrt experience on 21.02 (the biggest open surface).** Stock armvirt/64 rootfs ships NONE of this today — all of it gets built/probed here:
-  - **Status 2026-11-15:** the ROM zip now stages the full modem firmware dump (lowercase PIL names) + WCN3990 WLANMDSP/BDF + `wpad`/`iw` userspace into the system rootfs; drivers already in (modem-boot.ko module, qcacld+cfg80211 builtin).
-  - **Kernel base: LKGeek_sdm660 `adios-wayne`, as requested by the user, who reports it stable and bootable.** CI uses its native modem driver and records the resolved kernel/submodule commits plus the full resolved `.config` in the artifact. The old `a1e6b3a` modem injection and compatibility patches are no longer applied. The OpenWrt config fragment remains applied (including its explicit MEMCG disable); branch stability alone does not validate this combined OpenWrt build.
-  - **Boot regression under investigation (2026-11-17):** the user identifies `v0.1.0-m9` / commit `c5a492080462ae1a2edf2b089677536eda720eae` as the last working `openwrt-boot.img`. Both the ROM and RAM-only image from run `44130289033` fail on the device. That run built `a1e6b3a97b4d`, not `adios-wayne`. Direct artifact comparison finds identical RAM-only `/init`, static BusyBox, `/sbin/init`, command line, and load addresses; kernel payload, modules, and USB startup scripts differ. A SYSTEM mount failure cannot explain the RAM-only image's failure. **Root cause is not established; the previous scheduler-lineage diagnosis was unsupported and is withdrawn.** Installation success confirms rootfs extraction only; the ROM mount/handoff still needs separate runtime verification.
-  - **24.10.4 debug image (2026-11-18):** the previous test artifact had a literal `\\n` in the `ttyGS0` login executable path. New assembly writes and verifies an LF-terminated record, reuses the device-tested v0.9.16 `adios-wayne` kernel and matching modules, and includes the existing screen guard, repaired rmtfs/procd integration, and 24.10 Wi-Fi tools plus real WCN3990 firmware/BDFs. No replacement screen/modem/Wi-Fi scripts are introduced; existing helpers are repaired and installed. A standalone `build-2410.yml` workflow repacks the existing kernel instead of recompiling it. Module version/hash, firmware contents, native service links, console bytes, and package executables are CI gates. **Device limits:** modem power-up was observed through MBA/PIL and RMNET, followed by a repeating modem ERR_FATAL/SSR loop; new debug images load the control module but leave modem power-up opt-in. Read-only rmtfs shadows storage writes in RAM. No radio PHY has been observed; firmware packaging alone is not proven to fix ICNSS/QMI readiness. LuCI wireless view files already exist; previous claims that the view package was absent were wrong. Screen guard packaging/status fixes do not by themselves prove the physical panel went dark. Internal anonymous block automount is disabled in the new RAM debug image. No partition is flashed by this workflow. The first final-image gate also rejected legacy 5.4.255 modules embedded in the source 21.02 artifact; the 24.10 assembly now copies only the exact kernel-banner version directory.
-  - **24.10.4 Wi-Fi service startup:** `debug-2410-r1` boots on Wayne and reaches the serial shell. The screen guard loaded WLED and the panel was observed off. The Wi-Fi daemons fail at `PR_CAPBSET_DROP(38)` on the vendor kernel, which supports capabilities through 37. The separate `build-2410-ujail.yml` workflow restores the release-pinned SDK base feed, builds the patched jail helper with seccomp support, and verifies the package and installed binary hashes after repacking. CI compilation and on-device verification are pending. Detection of the Wi-Fi PHY remains a separate milestone.
-  - **LuCI webui** — package it into the image (opkg at CI time), reachable over usb0/ethernet; phone = router you configure in a browser.
-  - **Wi-Fi — AP (hotspot) vs client mode** — probe vendor `qcacld-3.0`/wlan driver against hostapd/wpa_supplicant on 4.19; vendor driver is cfg80211-based, so AP *may* work natively, but unproven → answer with evidence, not hope.
-  - **Cellular data** — SDM660 modem reachable only via Qualcomm IPC/QRTR stack (Android used qmuxd); bring-up = probe qrtr + data-path on 4.19. Hard, honest odds, same evidence rule.
-  - **Customization** — opkg feeds, themes, extra services. No dockerman: M7 answered NO (Docker lives on the mainline track).
-  - Also: Hermes agent port, firewall/NAT zones (lan/usb0/wan).
-  *Done when:* Wayne routes + serves (webui up, wifi + modem probed with YES/NO evidence) with config surviving reboot.
-- **M9★ — Polish + recovery-flashable ROM → v1.0.** Baked-in root password, RTC/NTP at boot, thermal/charging, USB reconnect watchdog. **The actual finish = flashable OpenWrt ROM for TWRP/OrangeFox**: recovery zip (`updater-script`/`update-binary`) dd's the boot image (kernel + tiny system-bootstrap initramfs) to the boot partition and installs the OpenWrt rootfs to the **system** partition (ext4); config/overlay persists on userdata via the rootfs fstab. Rationale (2026-11-14): the boot partition is 32 MiB and a full-OS initramfs already eats ~22 MB of it — initramfs-in-boot is a test vehicle, not the product shape. CI builds the zip every run; tag releases attach it (see "How it works"). *Done when:* zip flashed from OrangeFox → phone boots → SSH works → tag `v1.0`.
+- **M8 — Full OpenWrt experience on 21.02/24.10 (active, structure-first).** The RAM-only image is a test vehicle; the product is the split boot/system ROM.
+  - **M8-S0 — Base runtime. ✅ Partially verified.** 24.10.4 boots to a shell and SSH. The existing screen guard was observed to turn the panel off. Modem power-up reached MBA/PIL/RMNET but then entered a repeating ERR_FATAL/SSR loop, so automatic modem power-up remains disabled. No Wi-Fi PHY has been observed.
+  - **M8-S1 — ujail compatibility. ✅ CI / ⏳ device.** Run `44397558231` built `procd-ujail` from the pinned 24.10 SDK. The phone is still running the older image (`source_run=44151039361`, `procd` `42d39376-r1`), so the device result is pending a new image containing the package.
+  - **M8-S2 — Split boot/system product structure. ▶ Current focus.** `boot.img` contains only the kernel and tiny static bootstrap; `system` is ext4 and receives `rootfs.tar.gz`; userdata carries persistent config/overlay selected by the rootfs fstab. No full OpenWrt rootfs is allowed in the product boot image.
+  - **M8-S3 — Runtime handoff. ⏳ Pending.** Prove partition discovery, ext4 mount, `/sbin/init` presence, `switch_root`, and post-handoff SSH with serial markers. A completed recovery extraction is not sufficient evidence.
+  - **M8-S4 — Wi-Fi. ⏳ Blocked at PHY detection.** After S1, test userspace startup → firmware/BDF requests → ICNSS/QMI readiness → PHY registration → scan → AP/client. The vendor qcacld/cfg80211 driver probing at kernel boot does not prove a registered radio.
+  - **M8-S5 — Cellular data. ⏳ Pending.** Probe the Qualcomm IPC/QRTR path and data interface only after the modem ERR_FATAL/SSR behavior is isolated; no calibration/EFS writes.
+  - **M8-S6 — Services and polish. ⏳ Pending.** LuCI, firewall/NAT zones, native services, feeds, and reboot-persistent configuration. Docker remains out of v1.0 because M7 is closed NO.
+  *Done when:* the split ROM boots from the recovery-installed system rootfs, SSH and native services survive reboot, and Wi-Fi/modem are reported with separate verified YES/NO results.
+- **M9★ — Polish + recovery-flashable ROM → v1.0.** The structure is agreed but not runtime-closed: recovery zip (`updater-script`/`update-binary`) installs the rootfs to **system** and writes the kernel + tiny bootstrap to **boot**; config/overlay persists on userdata via the rootfs fstab. *Done when:* the zip is verified, flashed from OrangeFox, the bootstrap mounts system and reaches OpenWrt, SSH works, rollback is documented, and the tag `v1.0` is published.
 
 ### 🔮 Future track (parked, post-v1.0)
 
@@ -77,30 +99,36 @@ YOU ARE HERE
 ## How it works
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│                        boot.img                            │
-│  ┌──────────────┐  ┌───────────────────────────────────┐  │
-│  │ kernel + DTB │  │ initramfs = FULL OpenWrt rootfs   │  │
-│  │ (wayne)      │  │ (ImmortalWrt 21.02.7 armvirt/64)  │  │
-│  └──────────────┘  └───────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────┘
-        kernel boots → unpacks initramfs into RAM → runs /init
-        → /init hands control to OpenWrt's /sbin/init (procd)
+┌────────────────────────────── boot.img ──────────────────────────────┐
+│  kernel + DTB  │  tiny static bootstrap /init                        │
+└──────────────────────────────────────────────────────────────────────┘
+                 │ finds PARTNAME=system
+                 ▼
+┌──────────────────────────── system (ext4) ──────────────────────────┐
+│  complete OpenWrt rootfs: /sbin/init, procd, services, firmware      │
+└──────────────────────────────────────────────────────────────────────┘
+                 │ mount userdata and apply the rootfs fstab policy
+                 ▼
+        bootstrap validates /sbin/init → switch_root → procd
 ```
+
+The full-initramfs image follows the same userspace after unpacking, but it
+does **not** exercise the product's system-partition handoff and is therefore
+only a test/control image.
 
 Two boot images are produced per build:
 
 | Image | Contents | Purpose |
 |---|---|---|
 | `debug-boot.img` | kernel + tiny busybox shell (~1 MB ramdisk) | Proves the kernel itself boots on wayne. Dumps device tree, partitions, USB state to a serial console. |
-| `openwrt-boot.img` | kernel + full OpenWrt rootfs (~7 MB ramdisk, ~20 MB total) | The real thing. If debug boots and this doesn't, the problem is OpenWrt's userspace, not the kernel. |
+| `openwrt-boot.img` | kernel + full OpenWrt rootfs in RAM | RAM-only control image. It does not test the system-partition mount or recovery installation path. |
 | `donor-control.img` | PINNED donor kernel + PINNED donor Android ramdisk | **The control.** Known-good payload repacked through OUR packer. If this boots, our packer is fine; if it bootloops, our image assembly is the bug. |
 | `bisect-kernel.img` | OUR kernel + DONOR's Android ramdisk | Splits kernel vs initramfs faults: boots Android → kernel fine; loops → kernel at fault. |
 | `bisect-initramfs.img` | DONOR kernel + OUR debug initramfs | Splits the other way: loops → initramfs at fault; stuck-on-logo → PID 1 alive but invisible. |
-| `installer-boot.img` | kernel + installer ramdisk | Installs persistent rootfs to `mmcblk0p64` (userdata, ext4). **The only partition ever written.** 5 safety guards. |
-| `rom-boot.img` | kernel + tiny system-bootstrap ramdisk (~0.7 MB, ~15 MB total) | **The ROM's boot image.** Bootstrap mounts the system partition (PARTNAME=system, ext4) and switch_roots into the installed OpenWrt. No `root=` on the cmdline. |
+| `installer-boot.img` | kernel + installer ramdisk | Legacy/test installer path. It is not the v1.0 product path and must not be confused with the recovery zip. |
+| `rom-boot.img` | kernel + tiny system-bootstrap ramdisk | **The ROM's product boot image.** Bootstrap mounts `PARTNAME=system` as ext4, validates `/sbin/init`, and `switch_root`s into the installed OpenWrt. No `root=` on the cmdline. |
 
-**Release artifact: `wayne-openwrt-rom.zip`** — the TWRP/OrangeFox flashable ROM (M9 structure): `boot/boot.img` = `rom-boot.img`, `system/rootfs.tar.gz` = the OpenWrt rootfs, `META-INF` update-binary formats system ext4, extracts the rootfs there and dd's boot. Built by CI on every run and attached to tag releases.
+**Release artifact: `wayne-openwrt-rom.zip`** — the TWRP/OrangeFox flashable ROM (M9 structure): `boot/boot.img` = `rom-boot.img`, `system/rootfs.tar.gz` = the OpenWrt rootfs, and `META-INF` `update-binary` formats/extracts `system` and writes `boot.img`. Built by CI on every run and attached to tag releases. The recovery log and first-boot serial markers are required to close the handoff gate.
 
 ## Boot failure troubleshooting
 
