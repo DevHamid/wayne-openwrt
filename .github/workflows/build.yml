@@ -837,7 +837,7 @@ jobs:
             -O rootfs/openwrt-rootfs.tar.gz
           ls -lh rootfs/openwrt-rootfs.tar.gz
           tar tzf rootfs/openwrt-rootfs.tar.gz \
-            | grep -E '^(\\./)?(sbin/init|sbin/procd|etc/preinit|bin/busybox)$' | sort
+            | grep -E '(^|/)(sbin/init|sbin/procd|etc/preinit|bin/busybox)$' | sort
 
       - name: Download static BusyBox for the bootstrap wrapper
         run: |
