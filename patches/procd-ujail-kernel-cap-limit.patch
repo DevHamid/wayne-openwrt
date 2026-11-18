@@ -1,0 +1,41 @@
+--- a/jail/capabilities.c
++++ b/jail/capabilities.c
+@@ -130,7 +130,20 @@
+ 	/* drop from bounding set */
+ 	if (ocicapset.bounding != JAIL_CAP_ALL) {
+ 		for (cap = 0; cap <= CAP_LAST_CAP; cap++) {
+-			if (!prctl(PR_CAPBSET_READ, cap, 0, 0, 0)) {
++			int in_bounding;
++
++			errno = 0;
++			in_bounding = prctl(PR_CAPBSET_READ, cap, 0, 0, 0);
++			if (in_bounding < 0) {
++				/* The build headers can know capabilities newer than this kernel. */
++				if (errno == EINVAL) {
++					DEBUG("kernel does not support capability %d; skipping\n", cap);
++					continue;
++				}
++				ERROR("PR_CAPBSET_READ(%d) failed: %m\n", cap);
++				return errno;
++			}
++			if (in_bounding == 0) {
+ 				/* can't raise */
+ 				if (ocicapset.bounding & (1LLU << cap))
+ 					ERROR("capability %s (%d) is not in bounding set\n", capabilities_names[cap], cap);
+@@ -191,7 +204,16 @@
+ 	/* edit ambient set */
+ 	if (ocicapset.ambient != JAIL_CAP_ALL) {
+ 		for (cap = 0; cap <= CAP_LAST_CAP; cap++) {
++			errno = 0;
+ 			is_set = prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_IS_SET, cap, 0, 0);
++			if (is_set < 0) {
++				if (errno == EINVAL) {
++					DEBUG("kernel does not support ambient capability %d; skipping\n", cap);
++					continue;
++				}
++				ERROR("PR_CAP_AMBIENT_IS_SET(%d) failed: %m\n", cap);
++				return errno;
++			}
+ 			if ( (ocicapset.ambient & (1LLU << cap)) == 0) {
+ 				if (is_set) {
+ 					DEBUG("dropping capability %s (%d) from ambient set\n", capabilities_names[cap], cap);
