@@ -17,10 +17,20 @@ STOP=03
 boot_modem() {
 	# Load the modem-boot module if not already present.
 	if [ ! -e /sys/class/modem-boot/modem0/boot ]; then
-		modprobe modem-boot 2>/dev/null || {
-			logger -t modem-boot "modprobe modem-boot failed"
-			return 1
-		}
+		if ! modprobe modem-boot; then
+			# ubox scans a flat module directory; standard modules_install
+			# nests this file. Explicit-path loading was verified on Wayne.
+			module=/lib/modules/$(uname -r)/kernel/drivers/soc/qcom/modem-boot.ko
+			[ -f "$module" ] && insmod "$module" || return 1
+		fi
+	fi
+	[ -e /sys/class/modem-boot/modem0/boot ] || return 1
+	# The observed firmware reaches online then repeatedly reports ERR_FATAL.
+	# Expose the loaded module at boot, but leave power-up opt-in until that
+	# instability is resolved. No automatic retry/restart loop in userspace.
+	if [ "$(uci -q get wayne-modem.main.allow_boot)" != 1 ]; then
+		logger -t modem-boot "control ready; modem power-up disabled (known SSR loop)"
+		return 0
 	fi
 
 	# rmtfs must be alive and answering before the modem boots. Wait up to
@@ -36,8 +46,12 @@ boot_modem() {
 	fi
 
 	# Single cold-boot trigger.
-	echo 1 > /sys/class/modem-boot/modem0/boot 2>/dev/null
-	logger -t modem-boot "modem boot triggered"
+	if echo 1 > /sys/class/modem-boot/modem0/boot; then
+		logger -t modem-boot "boot request completed; check SSR logs for stability"
+	else
+		logger -t modem-boot "boot request failed"
+		return 1
+	fi
 }
 
 start() {

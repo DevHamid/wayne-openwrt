@@ -39,16 +39,18 @@ for f in "$SRC"/BDWLAN.*; do
     lower=$(echo "$base" | tr 'A-Z' 'a-z')   # bdwlan.b0a
     # bdwlan.b0a -> keep name, also make bdwlan30.b0a alias (30-series if)
     ln -sf "$base" "$FW/$lower"
-    ln -sf "$base" "$FW/bdwlan30.${base#BDWLAN.}" 2>/dev/null || true
+    ln -sf "$base" "$FW/bdwlan30.${lower#bdwlan.}"
     count=$((count+1))
 done
 echo "staged $count BDF variants"
 
-# --- 3. mac blob placeholder (WLAN_MAC_FILE). Driver can work with a zeroed
-#          one; if absent it just fails that request, not the whole probe. ---
-if [ ! -f "$FW/wlan_mac.bin" ]; then
-    : > "$FW/wlan_mac.bin"   # f make one; driver reads chip mac elsewhere
+# Do not synthesize a MAC/calibration file. A real device-provided value or
+# the driver's native fallback is required; an empty file is not calibration.
+if [ -f "$FW/wlan_mac.bin" ] && [ ! -s "$FW/wlan_mac.bin" ]; then
+    rm "$FW/wlan_mac.bin"
 fi
+[ -s "$FW/wlanmdsp.mbn" ] || { echo 'FATAL: WLANMDSP missing'; exit 1; }
+[ -s "$FW/bdwlan30.bin" ] || { echo 'FATAL: base BDF missing'; exit 1; }
 
 echo "wifi fw staged at $FW:"
 ls -la "$FW"

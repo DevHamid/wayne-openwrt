@@ -854,34 +854,11 @@ jobs:
       - name: Assemble ImmortalWrt 24.10.4 initramfs
         run: |
           set -euo pipefail
-          mkdir -p build/openwrt
-          cd build/openwrt
-          tar xzf ../../rootfs/openwrt-rootfs.tar.gz
-          ln -sf busybox bin/sh
-          mkdir -p etc/init.d etc/rc.d root
-          # 24.10's stock inittab differs from 21.02; add the ACM login only
-          # when the file exists, while keeping the image assembly strict.
-          if [ -f etc/inittab ]; then
-            printf '%s\\n' 'ttyGS0::askfirst:/usr/libexec/login.sh' >> etc/inittab
-          fi
-          cp ../../overlay-openwrt/init init
-          chmod +x init
-          cp ../../overlay-common/usb-gadget.sh usb-gadget.sh
-          chmod +x usb-gadget.sh
-          cp ../../overlay-openwrt/usb-gadget.init etc/init.d/usb-gadget
-          chmod +x etc/init.d/usb-gadget
-          ln -sf ../init.d/usb-gadget etc/rc.d/S95usb-gadget
-          cp ../../tc/busybox bin/busybox-static
-          chmod +x bin/busybox-static
-          mkdir -p etc/uci-defaults
-          cp ../../overlay-openwrt/etc/uci-defaults/90-usb0-lan etc/uci-defaults/90-usb0-lan
-          chmod +x etc/uci-defaults/90-usb0-lan
-          # Hard gates: the wrapper must have a real OpenWrt PID 1 target.
-          test -x sbin/init
-          test -x sbin/procd
-          (find . -print0 | cpio --null -o --format=newc 2>/dev/null \
+          python3 scripts/assemble-2410.py --source main-artifact --out build/openwrt --source-run "$GITHUB_RUN_ID"
+          cp build/openwrt/etc/wayne-build.json build/BUILD-INFO.json
+          (cd build/openwrt && find . -print0 | cpio --null -o --format=newc 2>/dev/null \
             | gzip -9 > ../openwrt-2410-initramfs.cpio.gz)
-          ls -lh ../openwrt-2410-initramfs.cpio.gz
+          ls -lh build/openwrt-2410-initramfs.cpio.gz
 
       - name: Pack and verify ImmortalWrt 24.10.4 boot image
         run: |
@@ -893,6 +870,7 @@ jobs:
           python3 scripts/check-pack.py mkboot donor-boot.img \
             "$KERNEL" build/openwrt-2410-initramfs.cpio.gz
           ls -lh build/openwrt-2410-boot.img
+          python3 scripts/check-2410.py build/openwrt-2410-boot.img "$KERNEL" | tee build/VERIFICATION.json
 
       - name: Upload ImmortalWrt 24.10.4 test image
         uses: actions/upload-artifact@v4

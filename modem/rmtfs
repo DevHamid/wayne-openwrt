@@ -1,136 +1,118 @@
 #!/bin/sh /etc/rc.common
-# rmtfs - firmware wiring + rmtfs daemon for the wayne (Mi 6X / sdm660) modem
-#
-# Boot order (NEVER swap steps 3 and 4):
-#   1. kernel up; /dev/uio* present. On fix-ksu-sugrant the
-#      qcom,sharedmem-uio node binds reg=<0x0 0x200000> dynamically
-#      (msm_sharedmem.c takes the dma_alloc_coherent path) - no DTS patch.
-#   2. this script mounts the modem firmware partition (VFAT) read-only.
-#   3. this script starts rmtfs so it answers the modem's remote-FS
-#      requests.
-#   4. ONLY THEN boot the modem:
-#        echo 1 > /sys/class/modem-boot/modem0/boot
-#      Put that trigger in /etc/rc.local, or another init.d at START=97+.
-# Booting the modem before rmtfs answers: MBA hands off, then the modem
-# watchdogs itself. Looks like a firmware fault; it is a sequencing fault.
-#
-# Firmware wiring: the kernel loader requests three things by lowercase
-# name: mba.mbn (pil-msa.c:656-670; mba.b00 for non-elf images),
-# modem.mdt + modem.bNN (peripheral-loader.c "%s.mdt" / "%s.b%02d").
-# Android ships MBA.MBN / MODEM.MDT / MODEM.B* uppercase on the modem
-# partition, so this script exposes lowercase names in /lib/firmware
-# pointing at the read-only mount.
-
+# Wayne diagnostic rmtfs service. Never write EFS/calibration partitions.
+USE_PROCD=1
 START=95
+STOP=10
+EXTRA_COMMANDS="diagnose"
+EXTRA_HELP="diagnose Show firmware, backing, and shared-memory state"
 
-FIRMWARE_DIR="/mnt/modem"
-MODEM_PART=""
-RMTFS_BIN="/usr/bin/rmtfs"
-# rmtfs flags (rmtfs.c getopt "o:S:Prsv"): -r read-only EFS backing,
-# -o DIR storage root (default /boot). Do NOT pass -s: that opens the
-# remoteproc via rproc_init() and exits - wayne boots the modem through
-# PIL/subsystem_get("modem"), not the remoteproc framework. Do NOT pass
-# the uio node as argv - rmtfs opens /dev/qcom_rmtfs_uio1 itself (we
-# create that symlink below).
-RMTFS_ARGS="-r -o /var/lib/rmtfs"
-# rmtfs_mem_open_uio() opens /dev/qcom_rmtfs_uio1 hardcoded, then reads
-# udev sysattrs maps/map0/{addr,size} off it. Our kernel's msm_sharedmem
-# makes a standard uio device (/dev/uioN named "rmtfs"), so we need a
-# symlink to the rmtfs uio node.
-RMTFS_UIO_DEV="/dev/qcom_rmtfs_uio1"
+RMTFS_BIN=/usr/bin/rmtfs
+RMTFS_ROOT=/tmp/wayne-rmtfs
+RMTFS_UIO_DEV=/dev/qcom_rmtfs_uio1
+FIRMWARE_MOUNT=
+FIRMWARE_DIR=
 
-log() {
-	logger -t rmtfs "$@"
+log() { logger -t rmtfs "$*"; }
+
+find_partition() {
+	local p name dev
+	for p in /sys/class/block/mmcblk0p*/uevent; do
+		[ -r "$p" ] || continue
+		name=$(sed -n 's/^PARTNAME=//p' "$p")
+		[ "$name" = "$1" ] || continue
+		dev=$(sed -n 's/^DEVNAME=//p' "$p")
+		[ -b "/dev/$dev" ] || continue
+		printf '%s\n' "/dev/$dev"
+		return 0
+	done
+	return 1
 }
 
 find_uio() {
 	local uio
 	for uio in /sys/class/uio/uio*; do
-		[ -e "$uio/name" ] || continue
-		if grep -q "rmtfs" "$uio/name" 2>/dev/null; then
-			echo "/dev/${uio##*/}"
-			return 0
-		fi
-	done
-	return 1
-}
-
-find_modem_part() {
-	local c
-	for c in /dev/block/by-name/modem \
-		 /dev/block/bootdevice/by-name/modem \
-		 /dev/block/platform/*/by-name/modem; do
-		[ -b "$c" ] && { echo "$c"; return 0; }
+		[ -r "$uio/name" ] || continue
+		[ "$(cat "$uio/name")" = rmtfs ] || continue
+		[ -c "/dev/${uio##*/}" ] || continue
+		printf '%s\n' "/dev/${uio##*/}"
+		return 0
 	done
 	return 1
 }
 
 mount_firmware() {
-	mkdir -p "$FIRMWARE_DIR"
-	mount | grep -q " on $FIRMWARE_DIR " && return 0
-	MODEM_PART=$(find_modem_part) || true
-	if [ -n "$MODEM_PART" ] && mount -o ro "$MODEM_PART" "$FIRMWARE_DIR"; then
-		return 0
+	local dev target rest part src
+	part=$(find_partition modem) || { log 'PARTNAME=modem not found'; return 1; }
+	# Reuse the automounter's existing mount. Do not remount or unmount it.
+	while read -r dev target rest; do
+		[ "$(readlink -f "$dev")" = "$part" ] || continue
+		FIRMWARE_MOUNT=$target
+		break
+	done < /proc/mounts
+	if [ -z "$FIRMWARE_MOUNT" ]; then
+		FIRMWARE_MOUNT=/mnt/wayne-modem-firmware
+		mkdir -p "$FIRMWARE_MOUNT" || return 1
+		mount -t vfat -o ro "$part" "$FIRMWARE_MOUNT" || return 1
 	fi
-	log "no modem firmware partition mounted (tried by-name/modem variants)"
+	# Stock Wayne firmware lives in image/, not the VFAT root.
+	for src in "$FIRMWARE_MOUNT/image" "$FIRMWARE_MOUNT"; do
+		if [ -f "$src/modem.mdt" ] || [ -f "$src/MODEM.MDT" ]; then
+			FIRMWARE_DIR=$src
+			return 0
+		fi
+	done
+	log "modem.mdt absent from $FIRMWARE_MOUNT/image and mount root"
 	return 1
 }
 
 wire_firmware() {
-	local src f base
-	mkdir -p /lib/firmware
-	for src in $(find "$FIRMWARE_DIR" -maxdepth 1 \( -iname 'mba.mbn' -o -iname 'mba.b00' \)); do
-		ln -sf "$src" "/lib/firmware/$(basename "$src" | tr 'A-Z' 'a-z')"
+	local src name lower dest
+	mkdir -p /lib/firmware || return 1
+	for src in "$FIRMWARE_DIR"/*; do
+		[ -f "$src" ] || continue
+		name=${src##*/}
+		lower=$(printf '%s' "$name" | tr 'A-Z' 'a-z')
+		case "$lower" in mba.mbn|mba.b00|modem.mdt|modem.b[0-9a-f][0-9a-f]) ;;
+			*) continue ;;
+		esac
+		dest=/lib/firmware/$lower
+		# Preserve valid firmware already shipped in a read-only ROM rootfs.
+		[ -r "$dest" ] || ln -s "$src" "$dest" || return 1
 	done
-	src=$(find "$FIRMWARE_DIR" -maxdepth 1 -iname 'modem.mdt' | head -n1)
-	if [ -z "$src" ]; then
-		log "modem.mdt not found on $FIRMWARE_DIR - is the firmware partition mounted?"
-		return 1
-	fi
-	ln -sf "$src" /lib/firmware/modem.mdt
-	for f in $(find "$FIRMWARE_DIR" -maxdepth 1 -iname 'modem.b[0-9][0-9]'); do
-		base=${f##*/}
-		ln -sf "$f" "/lib/firmware/$(echo "$base" | tr 'A-Z' 'a-z')"
+	[ -r /lib/firmware/mba.mbn ] && [ -r /lib/firmware/modem.mdt ] &&
+		[ -r /lib/firmware/modem.b00 ]
+}
+
+prepare_backing() {
+	local label part
+	mkdir -p "$RMTFS_ROOT" || return 1
+	for label in modemst1 modemst2 fsg fsc; do
+		part=$(find_partition "$label") || { log "missing PARTNAME=$label"; return 1; }
+		# Directory entries only. rmtfs -r opens backing O_RDONLY and shadows
+		# modem writes in RAM; never remove -r for a bring-up test.
+		ln -snf "$part" "$RMTFS_ROOT/$label" || return 1
 	done
 }
 
-start() {
+start_service() {
 	local uio
-
 	mount_firmware || return 1
-	wire_firmware || return 1
-
-	uio=$(find_uio)
-	if [ -z "$uio" ]; then
-		log "no rmtfs uio device found (expected name 'rmtfs' under /sys/class/uio/uio*/name)"
-		return 1
-	fi
-	if [ ! -x "$RMTFS_BIN" ]; then
-		log "$RMTFS_BIN not installed - build the Qualcomm rmtfs userspace"
-		return 1
-	fi
-
-	# rmtfs opens /dev/qcom_rmtfs_uio1 hardcoded; symlink our uio node
-	ln -sf "$uio" "$RMTFS_UIO_DEV"
-
+	wire_firmware || { log 'firmware wiring failed'; return 1; }
+	prepare_backing || return 1
+	uio=$(find_uio) || { log 'rmtfs UIO character device not found'; return 1; }
+	[ -x "$RMTFS_BIN" ] || { log "$RMTFS_BIN missing"; return 1; }
+	ln -snf "$uio" "$RMTFS_UIO_DEV" || return 1
 	procd_open_instance
-	procd_set_param command "$RMTFS_BIN" $RMTFS_ARGS
-	procd_set_param respawn
+	procd_set_param command "$RMTFS_BIN" -r -P -o "$RMTFS_ROOT" -v
+	procd_set_param respawn 3600 5 5
+	procd_set_param stdout 1
+	procd_set_param stderr 1
 	procd_close_instance
-
-	log "rmtfs started via $RMTFS_UIO_DEV -> $uio; firmware wired from $FIRMWARE_DIR"
+	log "registered daemon: UIO=$uio firmware=$FIRMWARE_DIR backing=READ-ONLY"
 }
 
-stop() {
-	# procd tears down instances; drop the firmware mount on shutdown
-	umount "$FIRMWARE_DIR" 2>/dev/null
-}
-
-status() {
-	local uio
-	uio=$(find_uio)
-	echo "rmtfs uio: ${uio:-none}"
-	mount | grep " on $FIRMWARE_DIR " || echo "firmware not mounted"
-	ls -l /lib/firmware/modem.mdt 2>/dev/null || echo "modem.mdt not wired"
-	cat /sys/class/modem-boot/modem0/state 2>/dev/null || echo "modem-boot module not loaded"
+diagnose() {
+	printf 'UIO: %s\n' "$(find_uio)"
+	ls -l "$RMTFS_ROOT" "$RMTFS_UIO_DEV" /lib/firmware/mba.mbn /lib/firmware/modem.mdt 2>/dev/null
+	cat /sys/class/modem-boot/modem0/state 2>/dev/null
 }

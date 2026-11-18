@@ -29,22 +29,44 @@
 # Detached-safe: `sh screen.sh guard 90 20 >/dev/null 2>&1 &`
 
 FB=/sys/class/graphics/fb0
-# BACKLIGHT NODE -- why this is not the LED: /sys/class/leds/lcd-backlight
-# EXISTS on wayne and accepts writes (readback 0/4095) but is a STUB: the panel
-# never changes. The node that actually drives the WLED string is the standard
-# backlight class device /sys/class/backlight/backlight (type=raw, max 4095).
-# Verified on-device 2026-10-17: echo 0 -> panel dark, echo 4095 -> panel lit.
-# Keep the LED path only as a fallback for kernels that expose it for real.
+# adios-wayne builds the backlight core and Qualcomm WLED as modules. The
+# MDSS LED node can report zero while the bootloader still lights the panel.
+# Load the real backlight driver before choosing a brightness actuator.
 BL=""
 MAXF=""
-for _d in /sys/class/backlight/*; do
-    [ -w "$_d/brightness" ] || continue
-    BL="$_d/brightness"; MAXF="$_d/max_brightness"; break
-done
-if [ -z "$BL" ]; then
-    BL=/sys/class/leds/lcd-backlight/brightness
-    MAXF=/sys/class/leds/lcd-backlight/max_brightness
-fi
+discover_backlight() {
+    local d
+    BL=""; MAXF=""
+    for d in /sys/class/backlight/*; do
+        [ -w "$d/brightness" ] || continue
+        BL="$d/brightness"; MAXF="$d/max_brightness"; break
+    done
+    if [ -z "$BL" ]; then
+        BL=/sys/class/leds/lcd-backlight/brightness
+        MAXF=/sys/class/leds/lcd-backlight/max_brightness
+    fi
+}
+ensure_backlight() {
+    local name module
+    if [ ! -d /sys/class/backlight ]; then
+        for name in backlight qcom-spmi-wled; do
+            if ! modprobe "$name" 2>/dev/null; then
+                module=/lib/modules/$(uname -r)/kernel/drivers/video/backlight/$name.ko
+                if [ -f "$module" ]; then
+                    insmod "$module" 2>/dev/null || logger -t burnin-guard "could not load $module"
+                fi
+            fi
+        done
+    elif [ ! -e /sys/class/backlight/backlight/brightness ]; then
+        modprobe qcom-spmi-wled 2>/dev/null || true
+    fi
+    discover_backlight
+    if [ "$BL" = /sys/class/leds/lcd-backlight/brightness ] && [ ! -f /tmp/.screen.fallback.warned ]; then
+        logger -t burnin-guard "no WLED backlight-class device; LED fallback is not physical screen-off proof"
+        touch /tmp/.screen.fallback.warned
+    fi
+}
+discover_backlight
 STATE=/root/.screen.bright
 PIDF=/root/.screen.pid
 VETO=/tmp/.screen.on
@@ -59,9 +81,10 @@ save_bright() {
 }
 
 do_off() {
+    ensure_backlight
     save_bright
-    echo 0 > "$BL" 2>/dev/null
-    echo 4 > "$FB/blank" 2>/dev/null || echo 1 > "$FB/blank" 2>/dev/null
+    printf '0\n' > "$BL" || { logger -t burnin-guard "brightness write failed: $BL"; return 1; }
+    printf '4\n' > "$FB/blank" || printf '1\n' > "$FB/blank"
 }
 
 do_on() {
@@ -88,17 +111,22 @@ case "$1" in
 status)
     echo "fb0/blank  : $(cat $FB/blank 2>/dev/null)"
     echo "brightness : $(cat $BL 2>/dev/null) / $(max)"
+    echo "node       : $BL (readback only; physical state needs observation)"
     echo "saved      : $(cat $STATE 2>/dev/null)"
     [ -f "$VETO" ] && echo "override   : ON (guard will keep it lit)" \
                    || echo "override   : off (guard blanks the panel)"
     if [ -f "$PIDF" ] && kill -0 "$(cat $PIDF)" 2>/dev/null; then
         echo "daemon     : running (pid $(cat $PIDF))"
+    elif command -v ubus >/dev/null 2>&1 && ubus call service list '{"name":"burnin-guard"}' 2>/dev/null | grep -q '"running": true'; then
+        echo "daemon     : running (procd burnin-guard)"
     else
         echo "daemon     : stopped"
     fi
     ;;
 off)
-    rm -f "$VETO"; do_off; echo "screen off"
+    rm -f "$VETO"
+    do_off || exit 1
+    echo "screen-off commands applied via $BL"
     ;;
 on)
     # Veto the guard FIRST, then kill any detached daemon, then light up.
