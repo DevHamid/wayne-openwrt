@@ -189,7 +189,7 @@ def main():
     shutil.rmtree(root / 'lib/modules', ignore_errors=True)
     # Reuse modules and static daemon from the SAME compiled-kernel artifact.
     for name, mode, data in newc(gzip.decompress(original.read_bytes())):
-        if name.startswith('lib/modules/') or name in ('usr/bin/rmtfs', 'bin/busybox-static'):
+        if name.startswith(f'lib/modules/{kv}/') or name == f'lib/modules/{kv}' or name in ('usr/bin/rmtfs', 'bin/busybox-static'):
             write_entry(root, name, mode, data)
     modules = root / 'lib/modules' / kv
     ko = modules / 'kernel/drivers/soc/qcom/modem-boot.ko'
