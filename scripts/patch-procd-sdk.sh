@@ -3,8 +3,9 @@
 set -eu
 SDK=${1:?usage: patch-procd-sdk.sh SDK-DIR}
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-RECIPE=$(find "$SDK/feeds" "$SDK/package" -path '*/system/procd/Makefile' -type f -print -quit 2>/dev/null || true)
-[ -n "$RECIPE" ] || { echo 'procd package recipe not found in SDK feeds/package' >&2; exit 1; }
+RECIPE="$SDK/package/feeds/base/procd/Makefile"
+[ -f "$RECIPE" ] || { echo 'procd recipe missing from the SDK base feed' >&2; exit 1; }
+grep -qx 'PKG_SOURCE_VERSION:=42d3937654508b04da64969f9d764ac2ec411904' "$RECIPE"
 PATCHDIR="$(dirname "$RECIPE")/patches"
 mkdir -p "$PATCHDIR"
 # Bump package release so the corrected jailer cannot be confused with the

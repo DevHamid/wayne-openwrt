@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Install only procd-ujail's verified binary/metadata from a trusted local IPK."""
 import argparse
+import hashlib
 import io
+import json
 from pathlib import Path
 import tarfile
 
@@ -67,7 +69,13 @@ def write_atomic(path,data,mode=0o644):
 
 
 def install(ipk_path,root):
-    ar=ar_members(ipk_path.read_bytes())
+    package = ipk_path.read_bytes()
+    if package.startswith(b'!<arch>\n'):
+        ar = ar_members(package)
+    else:
+        ar = {name: data for name, (_, data) in tar_files(package).items()}
+    if set(ar) != {'debian-binary', 'control.tar.gz', 'data.tar.gz'} or ar['debian-binary'] != b'2.0\n':
+        raise ValueError('Unexpected IPK archive format')
     control=tar_files(ar['control.tar.gz'])
     if 'control' not in control:
         raise ValueError('IPK control.tar.gz missing control file')
@@ -82,17 +90,25 @@ def install(ipk_path,root):
     executable=payload['sbin/ujail'][1]
     if len(executable)<4096 or b'kernel does not support capability %d; skipping' not in executable:
         raise ValueError('patched ujail marker absent from binary')
-    write_atomic(root/'sbin/ujail',executable,0o755)
     info=root/'usr/lib/opkg/info'
     # Replace only the old procd-ujail package record and file list.
     status_path=root/'usr/lib/opkg/status'
     paragraphs=status_path.read_text().strip().split('\n\n')
+    build_info = root / 'etc/wayne-build.json'
+    provenance = json.loads(build_info.read_text())
+    provenance['ujail'] = {
+        'version': meta['Version'],
+        'binary_sha256': hashlib.sha256(executable).hexdigest(),
+        'package_sha256': hashlib.sha256(package).hexdigest(),
+    }
     paragraphs=[p for p in paragraphs if not any(l=='Package: procd-ujail' for l in p.splitlines())]
     record=dict(meta);record['Status']='install user installed'
     paragraphs.append('\n'.join(f'{k}: {v}' for k,v in record.items()))
+    write_atomic(root/'sbin/ujail',executable,0o755)
     write_atomic(status_path,('\n\n'.join(paragraphs)+'\n\n').encode())
     write_atomic(info/'procd-ujail.control',control['control'][1])
     write_atomic(info/'procd-ujail.list',b'/sbin/ujail\n')
+    write_atomic(build_info, (json.dumps(provenance, indent=2) + '\n').encode())
     return {'package':meta['Package'],'version':meta['Version'],'binary_bytes':len(executable)}
 
 if __name__=='__main__':

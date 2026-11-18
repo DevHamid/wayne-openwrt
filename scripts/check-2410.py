@@ -14,7 +14,7 @@ assembly = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(assembly)
 
 
-def check(image_path, source_kernel):
+def check(image_path, source_kernel, expected_ujail=None):
     kernel, ramdisk = assembly.boot_parts(image_path.read_bytes())
     assert kernel == source_kernel.read_bytes(), 'Kernel payload changed'
     assert image_path.stat().st_size < 32 * 1024 * 1024, 'Debug boot image exceeds conservative 32 MiB limit'
@@ -46,6 +46,13 @@ def check(image_path, source_kernel):
     provenance = json.loads(files['etc/wayne-build.json'][1])
     assert provenance['rootfs'] == '24.10.4'
     assert provenance['kernel_sha256'] == hashlib.sha256(kernel).hexdigest()
+    if expected_ujail is not None:
+        mode, binary = files['sbin/ujail']
+        assert stat.S_ISREG(mode) and mode & 0o111, 'Packed ujail is not executable'
+        assert provenance['ujail']['package_sha256'] == hashlib.sha256(expected_ujail.read_bytes()).hexdigest()
+        assert provenance['ujail']['binary_sha256'] == hashlib.sha256(binary).hexdigest()
+        assert b'kernel does not support capability %d; skipping' in binary, 'Patched ujail missing from image'
+        required.append('sbin/ujail')
     kv = provenance['kernel_banner'].split()[2]
     mod = f'lib/modules/{kv}/kernel/drivers/soc/qcom/modem-boot.ko'
     assert mod in files, 'Matching modem module absent'
@@ -71,5 +78,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('image', type=Path)
     parser.add_argument('kernel', type=Path)
+    parser.add_argument('--expected-ujail', type=Path)
     args = parser.parse_args()
-    check(args.image, args.kernel)
+    check(args.image, args.kernel, args.expected_ujail)
