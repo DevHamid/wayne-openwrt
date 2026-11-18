@@ -49,34 +49,47 @@ jobs:
           echo 'f8b984d409d3ec5ea0e5ea07d1a59dadcd38bfb908e9059eff98e59a2f885a75  sdk.tar.zst' | sha256sum -c -
           mkdir sdk
           tar --zstd -xf sdk.tar.zst -C sdk --strip-components=1
-          test -x sdk/scripts/feeds
-          test -f sdk/package/system/procd/Makefile
-      - name: Patch and build only procd-ujail for 24.10
+          test -x sdk/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/bin/aarch64-openwrt-linux-musl-gcc
+          test -d sdk/staging_dir/target-aarch64_generic_musl/usr/include
+          test -d sdk/staging_dir/target-aarch64_generic_musl/usr/lib
+      - name: Patch the exact pinned 24.10 ujail source
         run: |
           set -euo pipefail
-          ./scripts/patch-procd-sdk.sh sdk
-          cd sdk
-          make defconfig
-          if ! grep -q '^CONFIG_PACKAGE_procd-ujail=y$' .config; then
-            printf '\nCONFIG_PACKAGE_procd-ujail=y\n' >> .config
-            make defconfig
-          fi
-          grep -q '^CONFIG_PACKAGE_procd-ujail=y$' .config
-          make package/system/procd/download V=s
-          make package/system/procd/prepare V=s
-          SRC=$(find build_dir -path '*/procd-*/jail/capabilities.c' -print -quit)
-          test -n "$SRC"
-          grep -q 'kernel does not support capability' "$SRC"
-          grep -q 'kernel does not support ambient capability' "$SRC"
-          make package/system/procd/compile V=s -j"$(nproc)"
-          IPK=$(find bin/packages -type f -name 'procd-ujail_*.ipk' -print -quit)
-          test -n "$IPK"
-          mkdir -p "$GITHUB_WORKSPACE/built-packages"
-          cp "$IPK" "$GITHUB_WORKSPACE/built-packages/"
-          cd "$GITHUB_WORKSPACE"
-          python3 scripts/install-ujail-ipk.py "built-packages/$(basename "$IPK")" /tmp/ujail-package-test
-          file /tmp/ujail-package-test/sbin/ujail
-          readelf -h /tmp/ujail-package-test/sbin/ujail | grep 'Machine:.*AArch64'
+          mkdir -p procd-src/jail
+          curl -fL --retry 3 https://raw.githubusercontent.com/openwrt/procd/42d3937654508b04da64969f9d764ac2ec411904/jail/capabilities.c -o procd-src/jail/capabilities.c
+          mkdir -p procd-src/include
+          for h in jail/capabilities.h jail/cgroups.h jail/elf.h jail/fs.h jail/jail.h jail/log.h jail/netifd.h jail/seccomp-oci.h; do
+            mkdir -p "procd-src/$(dirname "$h")"
+            curl -fL --retry 3 "https://raw.githubusercontent.com/openwrt/procd/42d3937654508b04da64969f9d764ac2ec411904/$h" -o "procd-src/$h"
+          done
+          curl -fL --retry 3 https://raw.githubusercontent.com/openwrt/procd/42d3937654508b04da64969f9d764ac2ec411904/capabilities-names.h -o procd-src/capabilities-names.h
+          patch --dry-run -p1 -d procd-src < patches/procd-ujail-kernel-cap-limit.patch
+          patch -p1 -d procd-src < patches/procd-ujail-kernel-cap-limit.patch
+          grep -q 'kernel does not support capability %d; skipping' procd-src/jail/capabilities.c
+      - name: Cross-build ujail against the SDK target libraries
+        run: |
+          set -euo pipefail
+          SDK="$PWD/sdk"
+          TARGET="$SDK/staging_dir/target-aarch64_generic_musl"
+          CC="$SDK/staging_dir/toolchain-aarch64_generic_gcc-13.3.0_musl/bin/aarch64-openwrt-linux-musl-gcc"
+          for h in libubox/blobmsg.h libubox/blobmsg_json.h libubus.h uci.h; do
+            test -f "$TARGET/usr/include/$h" || { echo "missing SDK target header: $h"; exit 1; }
+          done
+          for l in ubox ubus uci blobmsg_json json-c; do
+            find "$TARGET/usr/lib" "$TARGET/lib" -maxdepth 1 -name "lib$l.so*" -print -quit 2>/dev/null | grep -q . || { echo "missing SDK target library: $l"; exit 1; }
+          done
+          mkdir -p built-packages
+          "$CC" --sysroot="$TARGET" -Os -Wall -Werror -std=gnu99 \
+            -I"$TARGET/usr/include" -Iprocd-src/jail -Iprocd-src \
+            -o built-packages/ujail \
+            procd-src/jail/jail.c procd-src/jail/cgroups.c procd-src/jail/cgroups-bpf.c \
+            procd-src/jail/elf.c procd-src/jail/fs.c procd-src/jail/capabilities.c \
+            procd-src/jail/netifd.c \
+            -L"$TARGET/usr/lib" -L"$TARGET/lib" -lubox -lubus -luci -lblobmsg_json -ljson-c
+          file built-packages/ujail
+          readelf -h built-packages/ujail | grep 'Machine:.*AArch64'
+          readelf -d built-packages/ujail | grep -E 'NEEDED.*(ubox|ubus|uci|blobmsg|json)'
+          cp procd-src/jail/capabilities.c built-packages/capabilities.c
       - name: Assemble patched debug rootfs
         run: |
           set -euo pipefail
