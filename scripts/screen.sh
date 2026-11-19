@@ -83,8 +83,11 @@ save_bright() {
 do_off() {
     ensure_backlight
     save_bright
-    printf '0\n' > "$BL" || { logger -t burnin-guard "brightness write failed: $BL"; return 1; }
-    printf '4\n' > "$FB/blank" || printf '1\n' > "$FB/blank"
+    # Single write() per sysfs attribute: BusyBox printf flushes "0" and "\n"
+    # separately, and sysfs rejects the second write, which logged a false
+    # "brightness write failed" even though the value applied.
+    echo 0 > "$BL" || { logger -t burnin-guard "brightness write failed: $BL"; return 1; }
+    echo 4 > "$FB/blank" 2>/dev/null || echo 1 > "$FB/blank" 2>/dev/null
 }
 
 do_on() {

@@ -37,6 +37,15 @@ class ConsoleTests(unittest.TestCase):
             self.assertTrue(first.startswith(b'::sysinit:/etc/init.d/rcS S boot\n'))
 
 
+class ScreenTests(unittest.TestCase):
+    def test_sysfs_actuator_writes_are_single_write(self):
+        source = (BASE / 'scripts/screen.sh').read_text()
+        self.assertIn('echo 0 > "$BL"', source)
+        self.assertIn('echo 4 > "$FB/blank"', source)
+        self.assertNotIn("printf '0\\n' > \"$BL\"", source)
+        self.assertNotIn("printf '4\\n' > \"$FB/blank\"", source)
+
+
 class BootstrapTests(unittest.TestCase):
     def test_bootstrap_fails_closed_before_switch_root(self):
         init = (BASE / 'overlay-system/init').read_text()
