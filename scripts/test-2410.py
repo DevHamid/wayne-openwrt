@@ -55,6 +55,17 @@ class BootstrapTests(unittest.TestCase):
             workflow,
         )
 
+    def test_rom_rootfs_bundles_usb_gadget_helper_for_service(self):
+        workflow = (BASE / '.github/workflows/build.yml').read_text()
+        self.assertIn(
+            'install -D -m 0755 overlay-common/usb-gadget.sh "$ROOTFS/usr/lib/wayne/usb-gadget.sh"',
+            workflow,
+        )
+        self.assertIn(
+            "tar -tzf build/rom/system/rootfs.tar.gz | grep -Fxq './usr/lib/wayne/usb-gadget.sh'",
+            workflow,
+        )
+
     def test_bootstrap_starts_usb_gadget_without_blocking_system_lookup(self):
         init = (BASE / 'overlay-system/init').read_text()
         start = init.index('USB gadget setup started')

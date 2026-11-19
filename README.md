@@ -4,7 +4,7 @@
 
 **Vision / definition of done:** phone = pocket modem + services box, finished entirely on vendor kernel 4.19 + OpenWrt 21.02. **The finish line = a flashable OpenWrt ROM installable from TWRP/OrangeFox (recovery zip) — no PC, no fastboot.** Mainline kernel + OpenWrt 25/newest are a *future* track after v1.0 (mainline still buggy: partial modem, broken power management — moving now would break more than it fixes).
 
-## Current status (2026-11-18)
+## Current status (2026-11-19)
 
 The work is now **structure-first**. We are not treating the full-initramfs image as the product; it remains a RAM/test vehicle. The product path is:
 
@@ -19,6 +19,7 @@ OrangeFox/TWRP recovery zip
 - **Current device:** 24.10.4 shell and SSH are working. The installed image identifies source run `44151039361` / repository commit `23fa4291`; it still contains the older `procd`/`ujail` binary, so the latest CI fix is **not deployed on the phone yet**.
 - **Current Wi-Fi evidence:** the vendor WLAN/ICNSS driver probes during kernel boot, but `/sys/class/ieee80211` is empty and no Wi-Fi PHY exists. The repeated `PR_CAPBSET_DROP(38)` error is real on this image (`cap_last_cap=37`), but the ujail deployment must be tested before using the userspace failure as a Wi-Fi conclusion.
 - **Local M8-S2/S3 work in progress:** the system bootstrap now has explicit fail-closed paths for system lookup, ext4 mount, `/sbin/init`, mount moves, and `switch_root`; USB gadget setup is started asynchronously so its UDC wait cannot delay system discovery. The build now bundles the helper. Regression checks pass locally; this change is **not yet built by CI or tested on Wayne**.
+- **Latest ROM preview regression:** artifact inspection proved `etc/init.d/usb-gadget` was present but the helper it sources was absent from the persistent rootfs. The ROM workflow now stages `/usr/lib/wayne/usb-gadget.sh` and hard-gates it into `rootfs.tar.gz`. The user also reports screen-off regressed; the artifact contains the screen helper, procd guard, matching backlight/WLED modules, and dependency metadata, but those contents do not prove the panel turns off. That runtime symptom remains open for a first-boot probe.
 - **Safety boundary:** the current checks changed nothing on the phone. No EFS/calibration data, partition, or boot image is touched by the debugging path.
 
 ## Roadmap (interactive blueprint)

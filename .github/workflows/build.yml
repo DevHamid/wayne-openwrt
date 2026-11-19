@@ -514,6 +514,10 @@ jobs:
           # ROM-only extras. Runs AFTER the initramfs re-pack, so the RAM-only
           # boot images stay small; only system/rootfs.tar.gz carries these.
           ROOTFS="$GITHUB_WORKSPACE/build/openwrt"
+          # The post-switch_root procd service expects the gadget helper under
+          # this persistent-rootfs path. The bootstrap copy alone disappears
+          # at switch_root, so stage a separate copy into the system rootfs.
+          install -D -m 0755 overlay-common/usb-gadget.sh "$ROOTFS/usr/lib/wayne/usb-gadget.sh"
           # --- Modem: full firmware dump -> /lib/firmware. PIL probes mba.mbn,
           #     modem.mdt + .bNN there; the dump also carries WLANMDSP, ADSP...
           mkdir -p "$ROOTFS/lib/firmware"
@@ -554,7 +558,35 @@ jobs:
             || { echo "::error::wlan firmware missing from ROM rootfs"; exit 1; }
           [ -f "$ROOTFS/lib/firmware/modem.mdt" ] \
             || { echo "::error::modem firmware missing from ROM rootfs"; exit 1; }
-          echo "ROM rootfs: modem fw + wifi fw + wpad/iw staged"
+          # Hard-gate post-switch_root runtime helpers and the matched modular
+          # WLED stack used by the burn-in guard.
+          test -x "$ROOTFS/usr/lib/wayne/usb-gadget.sh" \
+            || { echo "::error::persistent USB gadget helper missing"; exit 1; }
+          grep -Fq '/usr/lib/wayne/usb-gadget.sh' "$ROOTFS/etc/init.d/usb-gadget" \
+            || { echo "::error::USB gadget service does not load persistent helper"; exit 1; }
+          test -x "$ROOTFS/root/screen.sh" \
+            || { echo "::error::screen helper missing from ROM rootfs"; exit 1; }
+          test -x "$ROOTFS/etc/init.d/burnin-guard" \
+            || { echo "::error::burn-in guard missing from ROM rootfs"; exit 1; }
+          test -L "$ROOTFS/etc/rc.d/S99burnin-guard" \
+            || { echo "::error::burn-in guard rc link missing"; exit 1; }
+          BL_KV=
+          for module_dir in "$ROOTFS"/lib/modules/4.19*; do
+            [ -d "$module_dir" ] || continue
+            BL_KV=${module_dir##*/}
+            break
+          done
+          [ -n "$BL_KV" ] \
+            || { echo "::error::matching kernel module directory missing"; exit 1; }
+          BL_DIR="$ROOTFS/lib/modules/$BL_KV/kernel/drivers/video/backlight"
+          test -f "$BL_DIR/backlight.ko" \
+            || { echo "::error::backlight core module missing"; exit 1; }
+          test -f "$BL_DIR/qcom-spmi-wled.ko" \
+            || { echo "::error::Qualcomm WLED module missing"; exit 1; }
+          grep -Fq 'kernel/drivers/video/backlight/qcom-spmi-wled.ko: kernel/drivers/video/backlight/backlight.ko' \
+            "$ROOTFS/lib/modules/$BL_KV/modules.dep" \
+            || { echo "::error::WLED module dependency metadata missing"; exit 1; }
+          echo "ROM rootfs: gadget helper, screen guard, matched backlight modules, modem+wifi fw and wpad/iw staged"
 
       - name: Assemble flashable ROM zip (rootfs -> system partition)
         run: |
@@ -571,6 +603,12 @@ jobs:
             -C build/openwrt .
           tar -tzf build/rom/system/rootfs.tar.gz | grep -q '^./sbin/init$' \
             || { echo "::error::rootfs.tar.gz missing ./sbin/init"; exit 1; }
+          tar -tzf build/rom/system/rootfs.tar.gz | grep -Fxq './usr/lib/wayne/usb-gadget.sh' \
+            || { echo "::error::ROM rootfs tar missing persistent USB gadget helper"; exit 1; }
+          tar -tzf build/rom/system/rootfs.tar.gz | grep -Fxq './root/screen.sh' \
+            || { echo "::error::ROM rootfs tar missing screen helper"; exit 1; }
+          tar -tzf build/rom/system/rootfs.tar.gz | grep -Fxq './etc/rc.d/S99burnin-guard' \
+            || { echo "::error::ROM rootfs tar missing burn-in guard service"; exit 1; }
           cp recovery/update-binary  build/rom/META-INF/com/google/android/update-binary
           cp recovery/updater-script build/rom/META-INF/com/google/android/updater-script
           (cd build/rom && zip -qr ../wayne-openwrt-rom.zip .)
