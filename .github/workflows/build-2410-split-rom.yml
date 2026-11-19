@@ -180,7 +180,9 @@ jobs:
             || { echo "::error::boot_sha256 mismatch"; exit 1; }
           [ "$(mval rootfs_sha256)" = "$(sha256sum build/rom/system/rootfs.tar.gz | cut -d' ' -f1)" ] \
             || { echo "::error::rootfs_sha256 mismatch"; exit 1; }
-          tar -tzf build/rom/system/rootfs.tar.gz | grep -Fxq ./sbin/init || { echo "::error::ota rootfs missing sbin/init"; exit 1; }
+          tar -tzf build/rom/system/rootfs.tar.gz > build/ota-rootfs.list \
+            || { echo "::error::ota rootfs unreadable"; exit 1; }
+          grep -Fxq ./sbin/init build/ota-rootfs.list || { echo "::error::ota rootfs missing sbin/init"; exit 1; }
           [ -n "$RELEASE_TAG" ] || echo "::warning::no release_tag: MANIFEST URLs empty, OTA is offline only"
           echo "MANIFEST written: $VERSION"
 
