@@ -11,9 +11,13 @@ on:
         description: Optional required headSha for the source run (pin a build)
         required: false
         default: ''
+      release_tag:
+        description: Release tag the ROM assets will live under; needed for an online OTA manifest (empty = offline manifest only)
+        required: false
+        default: ''
 
 permissions:
-  contents: read
+  contents: write
   actions: read
 
 jobs:
@@ -24,6 +28,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       SOURCE_RUN: ${{ inputs.source_run }}
       SOURCE_SHA: ${{ inputs.source_sha }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
     steps:
       - uses: actions/checkout@v4
 
@@ -155,6 +160,30 @@ jobs:
           PY
           ls -lh build/wayne-openwrt-rom.zip
 
+      - name: Emit OTA manifest
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG:-$(git rev-parse --short HEAD)}"
+          echo "version=$VERSION" > build/MANIFEST
+          cat build/MANIFEST
+          # wayne-ota expects boot_url/rootfs_url to be empty when released offline
+          # (file:// or bare path). Scripts/make-manifest.sh handles both cases.
+          scripts/make-manifest.sh "$VERSION" "${RELEASE_TAG:-}" build/rom-boot.img build/rom/system/rootfs.tar.gz \
+            > build/MANIFEST.tmp && mv build/MANIFEST.tmp build/MANIFEST
+          cat build/MANIFEST
+          # Validate the manifest matches the actual files (same checks as wayne-ota).
+          for key in version boot_sha256 rootfs_sha256 boot_url rootfs_url; do
+            grep "^${key}=" build/MANIFEST || { echo "::error::manifest missing $key"; exit 1; }
+          done
+          mval() { awk -F= -v k="$1" '$1==k {sub(/^[^=]*=/,""); print; exit}' build/MANIFEST; }
+          [ "$(mval boot_sha256)" = "$(sha256sum build/rom-boot.img | cut -d' ' -f1)" ] \
+            || { echo "::error::boot_sha256 mismatch"; exit 1; }
+          [ "$(mval rootfs_sha256)" = "$(sha256sum build/rom/system/rootfs.tar.gz | cut -d' ' -f1)" ] \
+            || { echo "::error::rootfs_sha256 mismatch"; exit 1; }
+          tar -tzf build/rom/system/rootfs.tar.gz | grep -Fxq ./sbin/init || { echo "::error::ota rootfs missing sbin/init"; exit 1; }
+          [ -n "$RELEASE_TAG" ] || echo "::warning::no release_tag: MANIFEST URLs empty, OTA is offline only"
+          echo "MANIFEST written: $VERSION"
+
       - uses: actions/upload-artifact@v4
         with:
           name: wayne-openwrt-2410-rom
@@ -162,4 +191,26 @@ jobs:
           path: |
             build/wayne-openwrt-rom.zip
             build/rom-boot.img
+            build/MANIFEST
+            build/rom/system/rootfs.tar.gz
             build/bootstrap-initramfs.cpio.gz
+
+      - name: Publish release (if tag provided)
+        if: inputs.release_tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          body: |
+            Wayne OpenWrt 24.10.4 ROM for Xiaomi Mi 6X (wayne).
+            Built from source_run ${{ inputs.source_run }}.
+            ```
+            Kernel: $(git rev-parse --short HEAD)
+            Source: ${{ inputs.source_run }}
+            ```
+          files: |
+            build/wayne-openwrt-rom.zip
+            build/rom-boot.img
+            build/MANIFEST
+            build/rom/system/rootfs.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
