@@ -4,9 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       source_run:
-        description: Successful vendor-kernel run to reuse (no recompilation)
+        description: Successful kernel run to reuse (no recompilation)
         required: true
         default: '44445539855'
+      source_sha:
+        description: Optional required headSha for the source run (pin a build)
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -19,6 +23,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       SOURCE_RUN: ${{ inputs.source_run }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
     steps:
       - uses: actions/checkout@v4
 
@@ -33,11 +38,13 @@ jobs:
           [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]]
           gh run view "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" --json headSha,conclusion > source-run.json
           python3 - <<'PY'
-          import json
+          import json, os
           run = json.load(open('source-run.json'))
           assert run['conclusion'] == 'success', 'Source run did not pass'
-          assert run['headSha'] == '7b24eac854ce3d8d48ab76cc3b8ac0316ad27643', run['headSha']
-          print('Reusing vendor kernel from', run['headSha'])
+          want = os.environ.get('SOURCE_SHA', '').strip()
+          if want:
+              assert run['headSha'] == want, f"source headSha {run['headSha']} != {want}"
+          print('Reusing kernel from', run['headSha'])
           PY
           gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" -n wayne-openwrt -D source
           KERNEL=$(find source -name Image.gz-dtb -print -quit)
