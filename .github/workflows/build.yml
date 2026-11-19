@@ -5,6 +5,11 @@ on:
     branches: [main]
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      kernel_ref:
+        description: Kernel branch/tag to build (instrumented branches allowed)
+        required: false
+        default: adios-wayne
 
 jobs:
   build:
@@ -176,13 +181,17 @@ jobs:
           ls -lh ../openwrt-initramfs.cpio.gz
 
       - name: Clone kernel source (with KernelSU submodule)
+        env:
+          KERNEL_REF: ${{ inputs.kernel_ref || 'adios-wayne' }}
         run: |
-          # User-selected stable base. Record the resolved branch tip so each
-          # artifact remains traceable even when adios-wayne advances.
-          git clone --branch adios-wayne --single-branch --recurse-submodules \
+          # Record the resolved branch tip so each artifact remains traceable
+          # even when the ref advances. KERNEL_REF lets an instrumented debug
+          # branch be built without touching adios-wayne.
+          git clone --branch "$KERNEL_REF" --single-branch --recurse-submodules \
             https://github.com/DevHamid/LKGeek_sdm660.git kernel
           mkdir -p build
-          git -C kernel log -1 --format='%H %s' > build/kernel-source.txt
+          printf 'ref=%s\n' "$KERNEL_REF" > build/kernel-source.txt
+          git -C kernel log -1 --format='%H %s' >> build/kernel-source.txt
           git -C kernel submodule status --recursive >> build/kernel-source.txt
           cat build/kernel-source.txt
           # drivers/kernelsu is a SYMLINK into the KernelSU submodule; a broken
