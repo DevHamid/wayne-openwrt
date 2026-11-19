@@ -481,7 +481,7 @@ jobs:
           mkdir -p build/bootstrap/bin build/bootstrap/dev build/bootstrap/proc build/bootstrap/sys build/bootstrap/tmp build/bootstrap/etc build/bootstrap/mnt
           cp tc/busybox build/bootstrap/bin/busybox-static
           chmod +x build/bootstrap/bin/busybox-static
-          for applet in sh basename cat date echo grep ln ls mkdir mknod mount rm sed sleep switch_root umount; do
+          for applet in sh basename cat cp cut date dd echo grep gzip head ln ls mkdir mknod mount mv rm sed sha256sum sleep switch_root tar umount; do
             ln -sf busybox-static build/bootstrap/bin/$applet
           done
           cp overlay-system/init build/bootstrap/init

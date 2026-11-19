@@ -1,0 +1,100 @@
+#!/bin/sh
+# wayne-ota -- stage a ROM update from inside the running system.
+#
+# Scope: this tool writes ONLY the boot partition (PARTNAME=boot) and a staging
+# directory inside the system partition (/wayne-ota). It never touches modem,
+# fsg/fsc, modemst*, persist, misc, recovery, vendor or userdata.
+#
+# Flow: download + verify -> back up current boot -> write new boot -> leave an
+# install flag -> reboot. The bootstrap /init performs the rootfs swap before
+# the normal handoff, so the new system is installed even though the running
+# root filesystem could not be reformatted in place.
+set -eu
+
+OTA_DIR=/wayne-ota
+MANIFEST_URL="${1:-}"
+
+log() { echo "wayne-ota: $*"; }
+die() { echo "wayne-ota: ERROR: $*" >&2; exit 1; }
+
+[ -n "$MANIFEST_URL" ] || die "usage: wayne-ota <manifest-url>"
+[ "$(id -u)" = "0" ] || die "must run as root"
+
+part_dev() {
+    for p in /sys/class/block/mmcblk0p*; do
+        [ "$(sed -n 's/^PARTNAME=//p' "$p/uevent" 2>/dev/null)" = "$1" ] || continue
+        printf '/dev/%s\n' "$(basename "$p")"
+        return 0
+    done
+    return 1
+}
+
+BOOT_DEV=$(part_dev boot) || die "boot partition not found"
+SYS_DEV=$(part_dev system) || die "system partition not found"
+[ -b "$BOOT_DEV" ] || die "$BOOT_DEV is not a block device"
+log "boot=$BOOT_DEV system=$SYS_DEV"
+
+mkdir -p "$OTA_DIR"
+# 32 MiB boot image + ~11 MiB rootfs + backup copy of the old boot.
+AVAIL_KB=$(df -k "$OTA_DIR" | awk 'NR==2 {print $4}')
+[ "${AVAIL_KB:-0}" -ge 262144 ] || die "need 256 MiB free in $OTA_DIR, have ${AVAIL_KB}K"
+
+log "fetching manifest"
+wget -q -O "$OTA_DIR/MANIFEST.new" "$MANIFEST_URL" || die "manifest download failed"
+grep -q '^version=' "$OTA_DIR/MANIFEST.new" || die "manifest missing version"
+grep -q '^boot_sha256=' "$OTA_DIR/MANIFEST.new" || die "manifest missing boot_sha256"
+grep -q '^rootfs_sha256=' "$OTA_DIR/MANIFEST.new" || die "manifest missing rootfs_sha256"
+grep -q '^boot_url=' "$OTA_DIR/MANIFEST.new" || die "manifest missing boot_url"
+grep -q '^rootfs_url=' "$OTA_DIR/MANIFEST.new" || die "manifest missing rootfs_url"
+
+mval() { sed -n "s/^$1=//p" "$OTA_DIR/MANIFEST.new" | head -n 1; }
+VERSION=$(mval version)
+BOOT_SHA=$(mval boot_sha256)
+ROOT_SHA=$(mval rootfs_sha256)
+BOOT_URL=$(mval boot_url)
+ROOT_URL=$(mval rootfs_url)
+
+log "target version: $VERSION"
+log "downloading boot image"
+wget -q -O "$OTA_DIR/boot.img.new" "$BOOT_URL" || die "boot download failed"
+log "downloading rootfs"
+wget -q -O "$OTA_DIR/rootfs.tar.gz.new" "$ROOT_URL" || die "rootfs download failed"
+
+log "verifying checksums"
+GOT_BOOT=$(sha256sum "$OTA_DIR/boot.img.new" | cut -d' ' -f1)
+[ "$GOT_BOOT" = "$BOOT_SHA" ] || die "boot sha256 mismatch ($GOT_BOOT != $BOOT_SHA)"
+GOT_ROOT=$(sha256sum "$OTA_DIR/rootfs.tar.gz.new" | cut -d' ' -f1)
+[ "$GOT_ROOT" = "$ROOT_SHA" ] || die "rootfs sha256 mismatch ($GOT_ROOT != $ROOT_SHA)"
+
+log "verifying rootfs archive contents"
+tar -tzf "$OTA_DIR/rootfs.tar.gz.new" > "$OTA_DIR/list.txt" 2>/dev/null || die "rootfs archive is not readable"
+for e in ./sbin/init ./etc/wayne-build.json; do
+    grep -Fxq "$e" "$OTA_DIR/list.txt" || die "rootfs archive missing $e"
+done
+rm -f "$OTA_DIR/list.txt"
+
+# Never ship a boot image larger than the partition.
+BOOT_BYTES=$(stat -c%s "$OTA_DIR/boot.img.new")
+BOOT_PART_BYTES=$(( $(cat "/sys/class/block/$(basename "$BOOT_DEV")/size") * 512 ))
+[ "$BOOT_BYTES" -lt "$BOOT_PART_BYTES" ] || die "boot image ($BOOT_BYTES) does not fit partition ($BOOT_PART_BYTES)"
+
+log "backing up current boot to $OTA_DIR/boot.prev"
+dd if="$BOOT_DEV" of="$OTA_DIR/boot.prev" bs=1M count=$(( BOOT_BYTES / 1048576 + 1 )) 2>/dev/null || die "boot backup failed"
+[ "$(stat -c%s "$OTA_DIR/boot.prev")" -ge "$BOOT_BYTES" ] || die "boot backup is short"
+
+log "writing new boot image"
+dd if="$OTA_DIR/boot.img.new" of="$BOOT_DEV" bs=1M conv=fsync 2>/dev/null || die "boot write failed"
+sync
+READBACK=$(dd if="$BOOT_DEV" bs=1M count=$(( (BOOT_BYTES + 1048575) / 1048576 )) 2>/dev/null | head -c "$BOOT_BYTES" | sha256sum | cut -d' ' -f1)
+[ "$READBACK" = "$BOOT_SHA" ] || die "boot readback mismatch ($READBACK != $BOOT_SHA)"
+log "boot image written and verified"
+
+mv -f "$OTA_DIR/rootfs.tar.gz.new" "$OTA_DIR/rootfs.tar.gz"
+printf 'version=%s\nrootfs_sha256=%s\nboot_sha256=%s\n' \
+    "$VERSION" "$ROOT_SHA" "$BOOT_SHA" > "$OTA_DIR/install.flag"
+sync
+
+log "staged $VERSION; rebooting to install"
+log "the bootstrap will verify, extract, and hand off; on failure it drops to a rescue shell"
+sync
+reboot

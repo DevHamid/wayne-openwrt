@@ -45,7 +45,9 @@ jobs:
           echo "KERNEL=$KERNEL" >> "$GITHUB_ENV"
 
       - name: Test assembly helpers
-        run: python3 scripts/test-2410.py -v
+        run: |
+          python3 scripts/test-2410.py -v
+          sh scripts/test-ota.sh
 
       - name: Assemble ImmortalWrt 24.10.4 system rootfs
         run: |
@@ -57,6 +59,7 @@ jobs:
           grep -Fq '/usr/lib/wayne/usb-gadget.sh' "$R/etc/init.d/usb-gadget"
           test -x "$R/sbin/init" || test -L "$R/sbin/init"
           test -x "$R/root/screen.sh"
+          test -x "$R/usr/sbin/wayne-ota"
           test -L "$R/etc/rc.d/S99burnin-guard"
           KV=
           for d in "$R"/lib/modules/4.19*; do
@@ -89,7 +92,7 @@ jobs:
           mkdir -p "$B/bin" "$B/dev" "$B/proc" "$B/sys" "$B/tmp" "$B/etc" "$B/mnt"
           cp build/openwrt/bin/busybox-static "$B/bin/busybox-static"
           chmod +x "$B/bin/busybox-static"
-          for applet in sh basename cat date echo grep ln ls mkdir mknod mount rm sed sleep switch_root umount; do
+          for applet in sh basename cat cp cut date dd echo grep gzip head ln ls mkdir mknod mount mv rm sed sha256sum sleep switch_root tar umount; do
             ln -sf busybox-static "$B/bin/$applet"
           done
           cp overlay-system/init "$B/init"
@@ -124,7 +127,7 @@ jobs:
             -C build/openwrt .
           T=build/rom/system/rootfs.tar.gz
           tar -tzf "$T" > build/rom-rootfs.list
-          for entry in ./sbin/init ./usr/lib/wayne/usb-gadget.sh ./root/screen.sh \
+          for entry in ./sbin/init ./usr/lib/wayne/usb-gadget.sh ./root/screen.sh ./usr/sbin/wayne-ota \
                        ./etc/rc.d/S99burnin-guard ./lib/firmware/wlan/qca_cld/wlanmdsp.mbn \
                        ./lib/firmware/modem.mdt ./lib/firmware/mba.mbn; do
             grep -Fxq "$entry" build/rom-rootfs.list || { echo "::error::rootfs missing $entry"; exit 1; }

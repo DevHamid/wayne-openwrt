@@ -71,6 +71,70 @@ MNT=/mnt/system
 mkdir -p "$MNT"
 mount -t ext4 "$TARGET" "$MNT" 2>/dev/null || \
     bootstrap_fatal "mount $MNT failed (system not formatted ext4?)"
+
+# --- 3b. Staged OTA install (wayne-ota) ------------------------------------
+# Runs before the /sbin/init check because the live system staged this update.
+# The tarball is verified in RAM first, so a corrupt download can never leave
+# the device without a bootable rootfs. The previous tree and boot image are
+# kept in RAM for a real rollback if the new tree fails verification.
+OTA_FLAG="$MNT/wayne-ota/install.flag"
+if [ -f "$OTA_FLAG" ]; then
+    echo "bootstrap: OTA staged update detected" > /dev/console
+    version=; rootfs_sha256=; boot_sha256=
+    . "$OTA_FLAG"
+    [ -n "$rootfs_sha256" ] || bootstrap_fatal "OTA: flag has no rootfs_sha256"
+    cp "$MNT/wayne-ota/rootfs.tar.gz" /tmp/rootfs.tar.gz || \
+        bootstrap_fatal "OTA: cannot copy rootfs to RAM; old system left intact"
+    got=$(sha256sum /tmp/rootfs.tar.gz | cut -d' ' -f1)
+    [ "$got" = "$rootfs_sha256" ] || \
+        bootstrap_fatal "OTA: rootfs checksum mismatch; old system left intact"
+    tar -tzf /tmp/rootfs.tar.gz > /tmp/ota.list 2>/dev/null || \
+        bootstrap_fatal "OTA: archive unreadable; old system left intact"
+    for e in ./sbin/init ./etc/wayne-build.json ./lib/ld-musl-aarch64.so.1; do
+        grep -Fxq "$e" /tmp/ota.list || \
+            bootstrap_fatal "OTA: archive missing $e; old system left intact"
+    done
+
+    echo "bootstrap: OTA verified $version; saving rollback copies" > /dev/console
+    tar -czf /tmp/prev-rootfs.tar.gz -C "$MNT" . 2>/dev/null || \
+        bootstrap_fatal "OTA: rollback backup failed; old system left intact"
+    if [ -f "$MNT/wayne-ota/boot.prev" ]; then
+        cp "$MNT/wayne-ota/boot.prev" /tmp/boot.prev
+    fi
+
+    echo "bootstrap: OTA replacing system tree" > /dev/console
+    rm -rf "$MNT"/* "$MNT"/.[!.]* 2>/dev/null
+    if ! tar -xzf /tmp/rootfs.tar.gz -C "$MNT"; then
+        echo "bootstrap: OTA extraction failed, rolling back" > /dev/console
+        rm -rf "$MNT"/* "$MNT"/.[!.]* 2>/dev/null
+        tar -xzf /tmp/prev-rootfs.tar.gz -C "$MNT" 2>/dev/null
+        sync
+        bootstrap_fatal "OTA extraction failed; previous system restored, reboot required"
+    fi
+    sync
+
+    if [ ! -x "$MNT/sbin/init" ] || [ ! -e "$MNT/lib/ld-musl-aarch64.so.1" ]; then
+        echo "bootstrap: OTA verification failed, rolling back" > /dev/console
+        rm -rf "$MNT"/* "$MNT"/.[!.]* 2>/dev/null
+        tar -xzf /tmp/prev-rootfs.tar.gz -C "$MNT" 2>/dev/null
+        if [ -f /tmp/boot.prev ]; then
+            BOOTDEV=
+            for p in /sys/class/block/mmcblk0p*; do
+                if [ "$(sed -n 's/^PARTNAME=//p' "$p/uevent" 2>/dev/null)" = boot ]; then
+                    BOOTDEV=/dev/$(basename "$p"); break
+                fi
+            done
+            [ -n "$BOOTDEV" ] && dd if=/tmp/boot.prev of="$BOOTDEV" bs=1M conv=fsync 2>/dev/null
+        fi
+        sync
+        bootstrap_fatal "OTA tree invalid; previous system and boot restored, reboot required"
+    fi
+
+    rm -rf "$MNT/wayne-ota" /tmp/rootfs.tar.gz /tmp/prev-rootfs.tar.gz /tmp/ota.list /tmp/boot.prev
+    sync
+    echo "bootstrap: OTA $version installed" > /dev/console
+fi
+
 [ -x "$MNT/sbin/init" ] || bootstrap_fatal "$MNT has no /sbin/init executable"
 
 echo "bootstrap: system mounted; /sbin/init present" > /dev/console

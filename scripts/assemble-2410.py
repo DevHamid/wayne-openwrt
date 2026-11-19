@@ -208,6 +208,7 @@ def main():
         ('overlay-openwrt/init', 'init'),
         ('overlay-common/usb-gadget.sh', 'usb-gadget.sh'),
         ('overlay-openwrt/usb-gadget.init', 'etc/init.d/usb-gadget'),
+        ('overlay-openwrt/usr/sbin/wayne-ota', 'usr/sbin/wayne-ota'),
         ('scripts/screen.sh', 'root/screen.sh'),
         ('overlay-openwrt/etc/init.d/burnin-guard', 'etc/init.d/burnin-guard'),
         ('modem/rmtfs', 'etc/init.d/rmtfs'),
