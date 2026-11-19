@@ -71,7 +71,7 @@ MNT=/mnt/system
 mkdir -p "$MNT"
 mount -t ext4 "$TARGET" "$MNT" 2>/dev/null || \
     bootstrap_fatal "mount $MNT failed (system not formatted ext4?)"
-[ -e "$MNT/sbin/init" ] || bootstrap_fatal "$MNT has no /sbin/init"
+[ -x "$MNT/sbin/init" ] || bootstrap_fatal "$MNT has no /sbin/init executable"
 
 echo "bootstrap: system mounted; /sbin/init present" > /dev/console
 
@@ -83,8 +83,7 @@ mount --move /sys  "$MNT/sys"   2>/dev/null || bootstrap_fatal "move /sys failed
 mount --move /tmp  "$MNT/tmp"   2>/dev/null || bootstrap_fatal "move /tmp failed"
 
 echo "bootstrap: switch_root -> $MNT /sbin/init" > /dev/console
-switch_root "$MNT" /sbin/init
-
-# switch_root should not return. Keep this as a separate fail-closed guard in
-# case the target init exits before replacing PID 1.
-bootstrap_fatal "switch_root returned"
+# BusyBox requires PID 1. Replace this shell rather than spawning a child.
+# Rescue is available for the checked failures above; once exec succeeds,
+# an error inside switch_root cannot return to this shell.
+exec switch_root "$MNT" /sbin/init

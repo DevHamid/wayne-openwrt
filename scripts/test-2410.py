@@ -44,9 +44,65 @@ class BootstrapTests(unittest.TestCase):
         self.assertIn('bootstrap_fatal "system partition not found', init)
         self.assertIn('bootstrap_fatal "mount $MNT failed', init)
         self.assertIn('bootstrap_fatal "$MNT has no /sbin/init', init)
-        self.assertIn('bootstrap_fatal "switch_root returned', init)
-        self.assertIn('switch_root "$MNT" /sbin/init', init)
-        self.assertNotIn('exec switch_root "$MNT" /sbin/init', init)
+
+    def test_handoff_preserves_bootstrap_pid(self):
+        self._check_handoff_pid(['sh'])
+
+    def test_handoff_preserves_bootstrap_pid_arm64(self):
+        import os
+        import shutil
+        binary = os.environ.get('BB')
+        if not binary or not shutil.which('qemu-aarch64-static'):
+            self.skipTest('ARM64 BusyBox and emulator supplied by repack CI')
+        self._check_handoff_pid(['qemu-aarch64-static', binary, 'sh'])
+
+    def _check_handoff_pid(self, shell):
+        import os
+        import sys
+        import shlex
+        init = (BASE / 'overlay-system/init').read_text()
+        tail = init[init.index('echo "bootstrap: ', init.index('# --- 4.')):]
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            stub = root / 'switch_root'
+            stub.write_text(
+                '#!' + sys.executable + '\n'
+                'import os, sys\n'
+                'same = os.getpid() == int(os.environ["BOOTSTRAP_PID"])\n'
+                'print("HANDOFF_PID_PRESERVED=" + str(same), flush=True)\n'
+                'sys.exit(0 if same else 41)\n'
+            )
+            stub.chmod(0o755)
+            harness = (
+                'export BOOTSTRAP_PID=$$\n'
+                'bootstrap_fatal() { echo "RESCUE: $*"; exit 99; }\n'
+                'MNT=' + shlex.quote(str(root)) + '\n' +
+                tail.replace('/dev/console', shlex.quote(str(root / 'console')))
+            )
+            env = dict(os.environ, PATH=str(root) + ':' + os.environ['PATH'])
+            result = subprocess.run(shell + ['-c', harness], env=env,
+                                    capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('HANDOFF_PID_PRESERVED=True', result.stdout)
+
+    def test_handoff_rejects_non_executable_init(self):
+        import shlex
+        init = (BASE / 'overlay-system/init').read_text()
+        guard = next(line for line in init.splitlines()
+                     if line.startswith('[ -') and '$MNT/sbin/init' in line)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / 'sbin').mkdir()
+            target = root / 'sbin/init'
+            target.write_text('#!/bin/sh\nexit 0\n')
+            target.chmod(0o644)
+            harness = ('MNT=' + shlex.quote(str(root)) + '\n'
+                       'bootstrap_fatal() { exit 99; }\n' + guard + '\n')
+            result = subprocess.run(['sh', '-c', harness], timeout=5)
+            self.assertEqual(result.returncode, 99)
+            target.chmod(0o755)
+            result = subprocess.run(['sh', '-c', harness], timeout=5)
+            self.assertEqual(result.returncode, 0)
 
     def test_bootstrap_bundles_gadget_helper(self):
         workflow = (BASE / '.github/workflows/build.yml').read_text()
@@ -65,6 +121,9 @@ class BootstrapTests(unittest.TestCase):
             "tar -tzf build/rom/system/rootfs.tar.gz | grep -Fxq './usr/lib/wayne/usb-gadget.sh'",
             workflow,
         )
+        self.assertIn('test -x "$ROOTFS/root/screen.sh"', workflow)
+        self.assertIn('test -x "$ROOTFS/etc/init.d/burnin-guard"', workflow)
+        self.assertIn('test -f "$BL_DIR/qcom-spmi-wled.ko"', workflow)
 
     def test_bootstrap_starts_usb_gadget_without_blocking_system_lookup(self):
         init = (BASE / 'overlay-system/init').read_text()
