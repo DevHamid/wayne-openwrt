@@ -123,12 +123,14 @@ jobs:
             --exclude=./mnt --exclude=./init --exclude=./rom --exclude=./usb-gadget.sh \
             -C build/openwrt .
           T=build/rom/system/rootfs.tar.gz
+          tar -tzf "$T" > build/rom-rootfs.list
           for entry in ./sbin/init ./usr/lib/wayne/usb-gadget.sh ./root/screen.sh \
                        ./etc/rc.d/S99burnin-guard ./lib/firmware/wlan/qca_cld/wlanmdsp.mbn \
                        ./lib/firmware/modem.mdt ./lib/firmware/mba.mbn; do
-            tar -tzf "$T" | grep -Fxq "$entry" || { echo "::error::rootfs missing $entry"; exit 1; }
+            grep -Fxq "$entry" build/rom-rootfs.list || { echo "::error::rootfs missing $entry"; exit 1; }
           done
-          tar -xzf "$T" -O ./etc/wayne-build.json | grep -q '"rootfs": "24.10.4"'
+          tar -xzf "$T" -O ./etc/wayne-build.json > build/wayne-build.json
+          grep -q '"rootfs": "24.10.4"' build/wayne-build.json
           cp recovery/update-binary build/rom/META-INF/com/google/android/update-binary
           cp recovery/updater-script build/rom/META-INF/com/google/android/updater-script
           (cd build/rom && zip -qr ../wayne-openwrt-rom.zip .)
