@@ -17,6 +17,16 @@ MANIFEST_URL="${1:-}"
 log() { echo "wayne-ota: $*"; }
 die() { echo "wayne-ota: ERROR: $*" >&2; exit 1; }
 
+# Accept file:// (or a bare path) so an offline device can install from files
+# pushed over the USB link, and https for a device with an upstream.
+fetch() {
+    case "$1" in
+        file://*) cp "${1#file://}" "$2" ;;
+        /*) cp "$1" "$2" ;;
+        *) wget -q -O "$2" "$1" ;;
+    esac
+}
+
 [ -n "$MANIFEST_URL" ] || die "usage: wayne-ota <manifest-url>"
 [ "$(id -u)" = "0" ] || die "must run as root"
 
@@ -40,7 +50,7 @@ AVAIL_KB=$(df -k "$OTA_DIR" | awk 'NR==2 {print $4}')
 [ "${AVAIL_KB:-0}" -ge 262144 ] || die "need 256 MiB free in $OTA_DIR, have ${AVAIL_KB}K"
 
 log "fetching manifest"
-wget -q -O "$OTA_DIR/MANIFEST.new" "$MANIFEST_URL" || die "manifest download failed"
+fetch "$MANIFEST_URL" "$OTA_DIR/MANIFEST.new" || die "manifest fetch failed"
 grep -q '^version=' "$OTA_DIR/MANIFEST.new" || die "manifest missing version"
 grep -q '^boot_sha256=' "$OTA_DIR/MANIFEST.new" || die "manifest missing boot_sha256"
 grep -q '^rootfs_sha256=' "$OTA_DIR/MANIFEST.new" || die "manifest missing rootfs_sha256"
@@ -56,9 +66,9 @@ ROOT_URL=$(mval rootfs_url)
 
 log "target version: $VERSION"
 log "downloading boot image"
-wget -q -O "$OTA_DIR/boot.img.new" "$BOOT_URL" || die "boot download failed"
+fetch "$BOOT_URL" "$OTA_DIR/boot.img.new" || die "boot fetch failed"
 log "downloading rootfs"
-wget -q -O "$OTA_DIR/rootfs.tar.gz.new" "$ROOT_URL" || die "rootfs download failed"
+fetch "$ROOT_URL" "$OTA_DIR/rootfs.tar.gz.new" || die "rootfs fetch failed"
 
 log "verifying checksums"
 GOT_BOOT=$(sha256sum "$OTA_DIR/boot.img.new" | cut -d' ' -f1)
@@ -74,13 +84,13 @@ done
 rm -f "$OTA_DIR/list.txt"
 
 # Never ship a boot image larger than the partition.
-BOOT_BYTES=$(stat -c%s "$OTA_DIR/boot.img.new")
+BOOT_BYTES=$(wc -c < "$OTA_DIR/boot.img.new")
 BOOT_PART_BYTES=$(( $(cat "/sys/class/block/$(basename "$BOOT_DEV")/size") * 512 ))
 [ "$BOOT_BYTES" -lt "$BOOT_PART_BYTES" ] || die "boot image ($BOOT_BYTES) does not fit partition ($BOOT_PART_BYTES)"
 
 log "backing up current boot to $OTA_DIR/boot.prev"
 dd if="$BOOT_DEV" of="$OTA_DIR/boot.prev" bs=1M count=$(( BOOT_BYTES / 1048576 + 1 )) 2>/dev/null || die "boot backup failed"
-[ "$(stat -c%s "$OTA_DIR/boot.prev")" -ge "$BOOT_BYTES" ] || die "boot backup is short"
+[ "$(wc -c < "$OTA_DIR/boot.prev")" -ge "$BOOT_BYTES" ] || die "boot backup is short"
 
 log "writing new boot image"
 dd if="$OTA_DIR/boot.img.new" of="$BOOT_DEV" bs=1M conv=fsync 2>/dev/null || die "boot write failed"
