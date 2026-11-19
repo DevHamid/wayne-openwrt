@@ -1,0 +1,153 @@
+name: Build Wayne 24.10 split ROM
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run:
+        description: Successful vendor-kernel run to reuse (no recompilation)
+        required: true
+        default: '44445539855'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  rom:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN: ${{ inputs.source_run }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install archive tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cpio zip unzip
+
+      - name: Verify source run and kernel provenance
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]]
+          gh run view "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" --json headSha,conclusion > source-run.json
+          python3 - <<'PY'
+          import json
+          run = json.load(open('source-run.json'))
+          assert run['conclusion'] == 'success', 'Source run did not pass'
+          assert run['headSha'] == '7b24eac854ce3d8d48ab76cc3b8ac0316ad27643', run['headSha']
+          print('Reusing vendor kernel from', run['headSha'])
+          PY
+          gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" -n wayne-openwrt -D source
+          KERNEL=$(find source -name Image.gz-dtb -print -quit)
+          test -n "$KERNEL"
+          echo "KERNEL=$KERNEL" >> "$GITHUB_ENV"
+
+      - name: Test assembly helpers
+        run: python3 scripts/test-2410.py -v
+
+      - name: Assemble ImmortalWrt 24.10.4 system rootfs
+        run: |
+          set -euo pipefail
+          python3 scripts/assemble-2410.py --source source --out build/openwrt --source-run "$SOURCE_RUN"
+          R=build/openwrt
+          install -D -m 0755 overlay-common/usb-gadget.sh "$R/usr/lib/wayne/usb-gadget.sh"
+          test -x "$R/usr/lib/wayne/usb-gadget.sh"
+          grep -Fq '/usr/lib/wayne/usb-gadget.sh' "$R/etc/init.d/usb-gadget"
+          test -x "$R/sbin/init" || test -L "$R/sbin/init"
+          test -x "$R/root/screen.sh"
+          test -L "$R/etc/rc.d/S99burnin-guard"
+          KV=
+          for d in "$R"/lib/modules/4.19*; do
+            [ -d "$d" ] && { KV=${d##*/}; break; }
+          done
+          test -n "$KV"
+          test -f "$R/lib/modules/$KV/kernel/drivers/video/backlight/qcom-spmi-wled.ko"
+          test -f "$R/lib/modules/$KV/kernel/drivers/soc/qcom/modem-boot.ko"
+          python3 -c "import json;d=json.load(open('$R/etc/wayne-build.json'));assert d['rootfs']=='24.10.4',d['rootfs']"
+          echo "KV=$KV" >> "$GITHUB_ENV"
+
+      - name: Stage modem firmware into the system rootfs
+        run: |
+          set -euo pipefail
+          R=build/openwrt
+          mkdir -p "$R/lib/firmware"
+          cp -a modem-firmware/. "$R/lib/firmware/"
+          for f in "$R"/lib/firmware/MBA.MBN "$R"/lib/firmware/MODEM.MDT "$R"/lib/firmware/MODEM.B??; do
+            [ -e "$f" ] && cp "$f" "$R/lib/firmware/$(basename "$f" | tr 'A-Z' 'a-z')"
+          done
+          test -f "$R/lib/firmware/modem.mdt"
+          test -f "$R/lib/firmware/mba.mbn"
+          test -f "$R/lib/firmware/wlan/qca_cld/wlanmdsp.mbn"
+          echo "modem + wlan firmware staged"
+
+      - name: Assemble tiny system bootstrap
+        run: |
+          set -euo pipefail
+          B=build/bootstrap
+          mkdir -p "$B/bin" "$B/dev" "$B/proc" "$B/sys" "$B/tmp" "$B/etc" "$B/mnt"
+          cp build/openwrt/bin/busybox-static "$B/bin/busybox-static"
+          chmod +x "$B/bin/busybox-static"
+          for applet in sh basename cat date echo grep ln ls mkdir mknod mount rm sed sleep switch_root umount; do
+            ln -sf busybox-static "$B/bin/$applet"
+          done
+          cp overlay-system/init "$B/init"
+          chmod +x "$B/init"
+          cp overlay-common/usb-gadget.sh "$B/usb-gadget.sh"
+          chmod +x "$B/usb-gadget.sh"
+          grep -q 'exec switch_root' "$B/init"
+          (cd "$B" && find . -print0 | cpio --null -o --format=newc --owner=0:0 2>/dev/null | gzip -9 > ../bootstrap-initramfs.cpio.gz)
+          ls -lh build/bootstrap-initramfs.cpio.gz
+
+      - name: Pack and verify boot image
+        run: |
+          set -euo pipefail
+          git clone --depth=1 --branch master-kernel-build-2022 \
+            https://android.googlesource.com/platform/system/tools/mkbootimg mkboot
+          curl -fL --retry 3 -o donor-boot.img \
+            https://github.com/DevHamid/Kernel_Action/raw/c947c2c04f1445437f507f2b138c34e918d3d54f/boot/boot.img
+          python3 scripts/pack-boot.py mkboot donor-boot.img "$KERNEL" \
+            build/bootstrap-initramfs.cpio.gz build/rom-boot.img
+          python3 scripts/check-pack.py mkboot donor-boot.img "$KERNEL" \
+            build/bootstrap-initramfs.cpio.gz
+          test "$(stat -c%s build/rom-boot.img)" -lt 33554432
+
+      - name: Assemble flashable ROM zip
+        run: |
+          set -euo pipefail
+          mkdir -p build/rom/boot build/rom/system build/rom/META-INF/com/google/android
+          cp build/rom-boot.img build/rom/boot/boot.img
+          tar -czf build/rom/system/rootfs.tar.gz \
+            --exclude=./proc --exclude=./sys --exclude=./dev --exclude=./tmp \
+            --exclude=./mnt --exclude=./init --exclude=./rom --exclude=./usb-gadget.sh \
+            -C build/openwrt .
+          T=build/rom/system/rootfs.tar.gz
+          for entry in ./sbin/init ./usr/lib/wayne/usb-gadget.sh ./root/screen.sh \
+                       ./etc/rc.d/S99burnin-guard ./lib/firmware/wlan/qca_cld/wlanmdsp.mbn \
+                       ./lib/firmware/modem.mdt ./lib/firmware/mba.mbn; do
+            tar -tzf "$T" | grep -Fxq "$entry" || { echo "::error::rootfs missing $entry"; exit 1; }
+          done
+          tar -xzf "$T" -O ./etc/wayne-build.json | grep -q '"rootfs": "24.10.4"'
+          cp recovery/update-binary build/rom/META-INF/com/google/android/update-binary
+          cp recovery/updater-script build/rom/META-INF/com/google/android/updater-script
+          (cd build/rom && zip -qr ../wayne-openwrt-rom.zip .)
+          python3 - <<'PY'
+          import hashlib, zipfile
+          z = zipfile.ZipFile('build/wayne-openwrt-rom.zip')
+          assert z.testzip() is None
+          boot = z.read('boot/boot.img')
+          assert boot == open('build/rom-boot.img', 'rb').read()
+          print('ZIP entries:', len(z.namelist()))
+          print('sha256:', hashlib.sha256(open('build/wayne-openwrt-rom.zip','rb').read()).hexdigest())
+          PY
+          ls -lh build/wayne-openwrt-rom.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wayne-openwrt-2410-rom
+          if-no-files-found: error
+          path: |
+            build/wayne-openwrt-rom.zip
+            build/rom-boot.img
+            build/bootstrap-initramfs.cpio.gz
