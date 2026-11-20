@@ -1,0 +1,10 @@
+#!/bin/sh /etc/rc.common
+USE_PROCD=1
+START=11
+STOP=89
+REGISTRY_ROLE=nameserver
+REGISTRY_DAEMON=qrtr-ns
+RADIO_BIN_DIR=${WAYNE_RADIO_BIN_DIR:-/usr/lib/wayne/radio}
+RADIO_MAP_DIR=${WAYNE_RADIO_MAP_DIR:-/usr/share/wayne/pd-maps}
+RADIO_TIMEOUT=${WAYNE_RADIO_TIMEOUT:-/bin/busybox-static}
+. "$RADIO_BIN_DIR/registry-service.sh"

@@ -1,0 +1,3 @@
+# Unified-diff context needs leading spaces/tabs and single-space blank lines.
+# Validate the applied C sources with git diff --check in the upstream tree.
+vendor-pil-mapdir.patch whitespace=-blank-at-eol,-space-before-tab

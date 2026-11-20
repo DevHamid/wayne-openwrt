@@ -1,0 +1,178 @@
+diff --git a/json.c b/json.c
+index 3bc1e68..bb6a91a 100644
+--- a/json.c
++++ b/json.c
+@@ -324,7 +324,7 @@ struct json_value *json_parse_file(const char *file)
+ 	int ret;
+ 	int fd;
+ 
+-	if ((strlen(file) > 3) && !strcmp(&file[strlen(file)-3], ".xz"))
++	if ((strlen(file) > 3) && !strcasecmp(&file[strlen(file)-3], ".xz"))
+ 	        fd = lzma_decomp(file);
+ 	else
+ 	        fd = open(file, O_RDONLY);
+diff --git a/pd-mapper.c b/pd-mapper.c
+index 1167e02..9da1a8e 100644
+--- a/pd-mapper.c
++++ b/pd-mapper.c
+@@ -54,6 +54,19 @@ struct pd_map {
+ 
+ static struct pd_map *pd_maps;
+ 
++static int valid_component(const char *value)
++{
++	const unsigned char *p = (const unsigned char *)value;
++
++	if (!p || !*p)
++		return 0;
++	for (; *p; p++)
++		if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
++		      (*p >= '0' && *p <= '9') || *p == '_' || *p == '-' || *p == '.'))
++			return 0;
++	return 1;
++}
++
+ static void handle_get_domain_list(int sock, const struct qrtr_packet *pkt)
+ {
+ 	struct servreg_loc_get_domain_list_resp resp = {};
+@@ -149,7 +162,10 @@ static int pd_load_map(const char *file)
+ 	if (ret)
+ 		return ret;
+ 
+-	if (!soc || !domain || !subdomain) {
++	if (!valid_component(soc) || !valid_component(domain) ||
++	    !valid_component(subdomain) || number < 0 || number > INT_MAX ||
++	    number != (int)number ||
++	    strlen(soc) + strlen(domain) + strlen(subdomain) + 2 >= 256) {
+ 		fprintf(stderr, "failed to parse sr_domain\n");
+ 		return -1;
+ 	}
+@@ -168,7 +184,8 @@ static int pd_load_map(const char *file)
+ 		provider = json_get_string(it, "provider");
+ 		service = json_get_string(it, "service");
+ 
+-		if (!provider || !service) {
++		if (!valid_component(provider) || !valid_component(service) ||
++		    strlen(provider) + strlen(service) + 1 >= 256) {
+ 			fprintf(stderr,
+ 				"failed to parse provdider or service from %s\n",
+ 				file);
+@@ -178,9 +195,13 @@ static int pd_load_map(const char *file)
+ 		map = &pd_maps[num_pd_maps++];
+ 
+ 		map->service = malloc(strlen(provider) + strlen(service) + 2);
++		if (!map->service)
++			return -1;
+ 		sprintf((char *)map->service, "%s/%s", provider, service);
+ 
+ 		map->domain = malloc(strlen(soc) + strlen(domain) + strlen(subdomain) + 3);
++		if (!map->domain)
++			return -1;
+ 		sprintf((char *)map->domain, "%s/%s/%s", soc, domain, subdomain);
+ 
+ 		map->instance = number;
+@@ -372,7 +393,40 @@ close_class:
+ 	return 0;
+ }
+ 
+-static int pd_load_maps(void)
++static int pd_enumerate_directory(struct assoc *json_set, const char *directory)
++{
++	struct dirent *entry;
++	struct stat st;
++	char path[PATH_MAX];
++	DIR *dir;
++	size_t len;
++	int ret = 0;
++	int count = 0;
++
++	dir = opendir(directory);
++	if (!dir) {
++		warn("cannot open explicit map directory");
++		return -1;
++	}
++	while ((entry = readdir(dir))) {
++		len = strlen(entry->d_name);
++		if (!((len > 4 && !strcasecmp(entry->d_name + len - 4, ".jsn")) ||
++		      (len > 7 && !strcasecmp(entry->d_name + len - 7, ".jsn.xz"))))
++			continue;
++		if (++count > 128 ||
++		    fstatat(dirfd(dir), entry->d_name, &st, AT_SYMLINK_NOFOLLOW) ||
++		    !S_ISREG(st.st_mode) || st.st_size <= 0 || st.st_size > 1048576 ||
++		    snprintf(path, sizeof(path), "%s/%s", directory, entry->d_name) >= sizeof(path)) {
++			ret = -1;
++			break;
++		}
++		assoc_set(json_set, path, NULL);
++	}
++	closedir(dir);
++	return ret;
++}
++
++static int pd_load_maps(const char *directory)
+ {
+ 	struct assoc json_set;
+ 	unsigned long it;
+@@ -381,7 +435,10 @@ static int pd_load_maps(void)
+ 
+ 	assoc_init(&json_set, 20);
+ 
+-	pd_enumerate_jsons(&json_set);
++	ret = directory ? pd_enumerate_directory(&json_set, directory) :
++		pd_enumerate_jsons(&json_set);
++	if (ret)
++		goto out;
+ 
+ 	assoc_foreach(jsn, NULL, &json_set, it) {
+ 		ret = pd_load_map(jsn);
+@@ -389,6 +446,7 @@ static int pd_load_maps(void)
+ 			break;
+ 	}
+ 
++out:
+ 	assoc_destroy(&json_set);
+ 
+ 	return ret;
+@@ -403,8 +461,27 @@ int main(int argc, char **argv)
+ 	char buf[4096];
+ 	int ret;
+ 	int fd;
++	const char *directory = NULL;
++	int check_only = 0;
++	int option;
++	int count = 0;
++	const struct pd_map *map;
++
++	while ((option = getopt(argc, argv, "d:nh")) != -1) {
++		switch (option) {
++		case 'd': directory = optarg; break;
++		case 'n': check_only = 1; break;
++		case 'h':
++			fprintf(stdout, "Usage: %s [-d map-directory] [-n]\n", argv[0]);
++			return 0;
++		default:
++			return 2;
++		}
++	}
++	if (optind != argc || (check_only && !directory))
++		return 2;
+ 
+-	ret = pd_load_maps();
++	ret = pd_load_maps(directory);
+ 	if (ret)
+ 		exit(1);
+ 
+@@ -412,6 +489,13 @@ int main(int argc, char **argv)
+ 		fprintf(stderr, "no pd maps available\n");
+ 		exit(1);
+ 	}
++	if (check_only) {
++		for (map = pd_maps; map->service; map++, count++)
++			printf("map service=%s domain=%s instance=%d\n",
++			       map->service, map->domain, map->instance);
++		printf("maps_validated=%d\n", count);
++		return count ? 0 : 1;
++	}
+ 
+ 	fd = qrtr_open(0);
+ 	if (fd < 0) {
