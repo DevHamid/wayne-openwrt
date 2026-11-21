@@ -279,10 +279,131 @@ out:
 	return rc;
 }
 
+/* Fixed QUERY_STATE read: no registration, provider, restart or arbitrary PD. */
+static int parse_root_state(const uint8_t *b, size_t n, int *result, int *error,
+                            uint32_t *state, int *state_valid)
+{
+	unsigned int seen = 0;
+	size_t off = HDR_LEN;
+	if (n < 14 || n > 21 || b[0] != QMI_RESPONSE || b[1] != 1 || b[2] ||
+	    b[3] != 0x21 || b[4] || n != HDR_LEN + b[5] + ((size_t)b[6] << 8))
+		return -1;
+	*state_valid = 0;
+	while (off < n) {
+		size_t len;
+		unsigned int bit;
+		if (n - off < 3) return -1;
+		len = b[off + 1] | ((size_t)b[off + 2] << 8);
+		if (len != 4 || len > n - off - 3) return -1;
+		if (b[off] == 2) {
+			bit = 1;
+			*result = b[off + 3] | ((unsigned int)b[off + 4] << 8);
+			*error = b[off + 5] | ((unsigned int)b[off + 6] << 8);
+		} else if (b[off] == 0x10) {
+			bit = 2;
+			*state = (uint32_t)b[off + 3] | ((uint32_t)b[off + 4] << 8) |
+			         ((uint32_t)b[off + 5] << 16) | ((uint32_t)b[off + 6] << 24);
+			*state_valid = 1;
+		} else return -1;
+		if (seen & bit) return -1;
+		seen |= bit;
+		off += 3 + len;
+	}
+	return (seen & 1) ? 0 : -1;
+}
+
+static int report_root_state(const uint8_t *b, size_t n)
+{
+	int result = -1, error = -1, valid = 0;
+	uint32_t state = 0;
+	const char *label;
+	if (parse_root_state(b, n, &result, &error, &state, &valid) < 0) {
+		puts("root_query=rejected reason=invalid_response");
+		return 7;
+	}
+	if (result || error) {
+		printf("root_query=refused qmi_result=%d qmi_error=%d\n", result, error);
+		return 8;
+	}
+	label = !valid ? "ABSENT" : state == 0x7fffffff ? "UNINIT" :
+	        state == 0x0fffffff ? "DOWN" : state == 0x1fffffff ? "UP" : "UNKNOWN";
+	printf("root_query=verified state=%s qmi_result=0 qmi_error=0", label);
+	if (valid) printf(" state_raw=0x%08x", state);
+	putchar('\n');
+	return 0;
+}
+
+static int root_request(uint8_t *b, size_t n)
+{
+	int len = build_request(b, n, 1, "msm/modem/root_pd");
+	if (len > 0) b[3] = 0x21;
+	return len;
+}
+
+static int do_query_root(unsigned int node, unsigned int port)
+{
+	uint8_t request[128], response[64];
+	struct sockaddr_qrtr addr = { .sq_family = AF_QIPCRTR, .sq_node = node, .sq_port = port };
+	struct sockaddr_qrtr peer = {0};
+	socklen_t peer_len = sizeof(peer);
+	struct timeval tv = { .tv_sec = 2 };
+	int len = root_request(request, sizeof(request)), fd, rc = 4;
+	ssize_t n;
+	if (len < 0) return 2;
+	fd = socket(AF_QIPCRTR, SOCK_DGRAM, 0);
+	if (fd < 0) return 3;
+	if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0 ||
+	    connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) goto out;
+	puts("root_query_attempt=1"); fflush(stdout);
+	if (send(fd, request, (size_t)len, MSG_DONTWAIT) != len) { rc = 5; goto out; }
+	printf("root_query_sent=1 bytes=%d\n", len); fflush(stdout);
+	n = recvfrom(fd, response, sizeof(response), MSG_TRUNC,
+	             (struct sockaddr *)&peer, &peer_len);
+	if (n < 0) {
+		printf("root_query=timeout_or_error errno=%d\n", errno); rc = 6;
+	} else if ((size_t)n > sizeof(response)) {
+		puts("root_query=rejected reason=oversize_response"); rc = 7;
+	} else if (peer_len != sizeof(peer) || peer.sq_family != AF_QIPCRTR ||
+	           peer.sq_node != node || peer.sq_port != port) {
+		puts("root_query=rejected reason=wrong_peer"); rc = 7;
+	} else {
+		puts("root_query_peer=matched");
+		rc = report_root_state(response, (size_t)n);
+	}
+out:
+	if (close(fd) < 0) { puts("root_query_socket=close_failed"); return 9; }
+	puts("root_query_socket=closed");
+	return rc;
+}
+
 int main(int argc, char **argv)
 {
 	uint8_t buf[256];
 	int n, result = -1, error = -1, rc;
+
+	if (argc == 2 && !strcmp(argv[1], "--root-packet")) {
+		n = root_request(buf, sizeof(buf));
+		if (n < 0) return 2;
+		print_hex(buf, (size_t)n); return 0;
+	}
+	if (argc == 3 && !strcmp(argv[1], "--parse-root")) {
+		if (strspn(argv[2], "0123456789abcdefABCDEF") != strlen(argv[2])) return 2;
+		n = hex_to_bytes(argv[2], buf, sizeof(buf));
+		if (n < 0) return 2;
+		return report_root_state(buf, (size_t)n);
+	}
+	if (argc == 4 && !strcmp(argv[1], "--query-root")) {
+		unsigned long value[2];
+		for (int i = 0; i < 2; i++) {
+			char *end;
+			const char *arg = argv[i + 2];
+			if (!*arg || strspn(arg, "0123456789") != strlen(arg)) return 2;
+			errno = 0; value[i] = strtoul(arg, &end, 10);
+			if (errno || *end || value[i] >= 0xfffffffeUL) return 2;
+		}
+		if (!value[1]) return 2;
+		return do_query_root((unsigned int)value[0], (unsigned int)value[1]);
+	}
 
 	if (argc == 3 && !strcmp(argv[1], "--packet")) {
 		n = build_request(buf, sizeof(buf), 0x01, argv[2]);
@@ -320,10 +441,11 @@ int main(int argc, char **argv)
 			       (unsigned int)strtoul(argv[3], NULL, 0), argv[4]);
 
 	fprintf(stderr,
-		"usage: %s --packet <pd-path>\n"
+		"usage: %s --root-packet | --parse-root <hex> | --query-root <node> <port>\n"
+		"       %s --packet <pd-path>\n"
 		"       %s --parse <hex>\n"
 		"       %s --send <node> <port> <pd-path>\n"
 		"       %s --listen-restart <node> <port> <pd-path> <provider-pid> <provider-exe>\n",
-		argv[0], argv[0], argv[0], argv[0]);
+		argv[0], argv[0], argv[0], argv[0], argv[0]);
 	return 1;
 }

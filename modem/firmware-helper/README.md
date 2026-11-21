@@ -60,6 +60,20 @@ opcode of each non-control packet, both before dispatch. This exists because an
 "the listener never ran". Normal (non-`-r`) operation is unchanged and prints
 neither line. Live result and limits: [RX-OBSERVATION.md](RX-OBSERVATION.md).
 
+## Fixed root-domain state read
+
+The same userspace diagnostic now has a separate `--query-root <node> <port>`
+mode for **QUERY_STATE (`0x0021` on service 66)** and the fixed
+`msm/modem/root_pd` name. It neither registers a listener nor restarts anything.
+`--root-packet` and `--parse-root <hex>` exercise encoding/decoding without
+network access. Live execution still requires fresh service/instance discovery,
+an operation budget and independent closeout; do not guess a port.
+
+The peer-validated native read returned root-domain **UP** while subsequent
+WLFW discovery and `iw dev` remained empty. A first unpeered sample is graded
+separately; both sends are counted. Implementation, negative tests, live scope
+and limitations: [ROOT-STATE.md](ROOT-STATE.md).
+
 ## PDR listener/restart diagnostic
 
 `pdr_restart.c` also has an explicitly invoked `--listen-restart` mode. Build

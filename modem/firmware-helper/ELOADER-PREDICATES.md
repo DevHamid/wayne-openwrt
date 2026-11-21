@@ -124,6 +124,12 @@ initialization from a local rejection, failed lookup/metadata check, a prior
 attempt or another route. No retry, filename rewrite or kernel symbol change
 is justified solely by that observation.
 
+## Subsequent runtime observation
+
+[ROOT-STATE.md](ROOT-STATE.md) records a sender-validated QUERY_STATE response
+of **UP** for the root domain. That is not a direct read of the local state
+word or initialization-group progress, and does not establish WLAN readiness.
+
 ## Next evidence gate
 
 Determine the **runtime** selected initialization group/progress, local

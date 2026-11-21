@@ -1,0 +1,85 @@
+{
+  "scope": "two fixed read-only root QUERY_STATE windows; not a WLAN fix",
+  "windows": [
+    {
+      "window": 1,
+      "attempts": 1,
+      "successful_sends": 1,
+      "message": "0x0021",
+      "service": 66,
+      "domain": "msm/modem/root_pd",
+      "request_bytes": 27,
+      "qmi_result": 0,
+      "qmi_error": 0,
+      "reported_state": "UP",
+      "reported_state_raw": "0x1fffffff",
+      "peer_explicitly_checked": false,
+      "target_wrapped_scenarios_before_query": 13,
+      "independent_cleanup_verified": true,
+      "binary_sha256": {
+        "root-query": "0ce7c8ab4b86745df08e15cfffd5d06f1a50d8e7c987465de968c957f0c50355",
+        "root-fixture": "7254dbce67f600f8157ff5bfb7254bdbf0ef68e6750197d6e8ff1b61646a3197"
+      }
+    },
+    {
+      "window": 2,
+      "attempts": 1,
+      "successful_sends": 1,
+      "message": "0x0021",
+      "service": 66,
+      "domain": "msm/modem/root_pd",
+      "request_bytes": 27,
+      "qmi_result": 0,
+      "qmi_error": 0,
+      "reported_state": "UP",
+      "reported_state_raw": "0x1fffffff",
+      "peer_explicitly_checked": true,
+      "target_wrapped_scenarios_before_query": 17,
+      "independent_cleanup_verified": true,
+      "binary_sha256": {
+        "root-query": "894a1e0e66ae3277189cc21750112aabc818a16d5f02a3e7b5c7b5230c70cc3e",
+        "root-fixture": "63387d4794a228a251863e8ae1c6fb9f7dcfd8fee34e2f785549619bb012d54a"
+      }
+    }
+  ],
+  "cumulative": {
+    "attempts": 2,
+    "successful_sends": 2,
+    "listener_requests": 0,
+    "restart_requests": 0,
+    "modem_acquisitions": 0
+  },
+  "tests": {
+    "host": 30,
+    "sanitizers": 18
+  },
+  "independent_closeout": {
+    "same_boot": true,
+    "modem_state": "ONLINE",
+    "crash_count": 0,
+    "original_readonly_rmtfs_retained": true,
+    "allow_boot": 0,
+    "dump_gates": [
+      0,
+      0
+    ],
+    "helper_processes_absent": true,
+    "staging_removed": true
+  },
+  "source_binary_sha256": {
+    "pdr_restart.c": "5f3181b2acc36858af06474be88480f7032cd7169e38e3097d1aa1498bb3861a",
+    "pdr_fixture.c": "a108c7b9e145284e47ef65dd41eddad41eef0964d7a5336104848e71e3100a98",
+    "test_root_state.py": "b6cc219c6f59b326276b22e54d834926a658185b1732e09371e9d23e1d2f2b78",
+    "test_pdr_listener.py": "c592b372bad4fd28c158fc64dc0ad6b8ac1e6094551deb445ce34e3c0edb1d5d",
+    "test_pdr.py": "a109a10b819d5f9ca5fdf4e6a027348296c71cc63e6b0a490845f0ebfc962359",
+    "build_pdr.py": "ea945e696e879da8ca893e0277cf0ef34b04d271faa66f6a8f56a0332b1afdf9",
+    "build/arm64/pdr_restart": "894a1e0e66ae3277189cc21750112aabc818a16d5f02a3e7b5c7b5230c70cc3e",
+    "build/arm64/pdr-fixture": "63387d4794a228a251863e8ae1c6fb9f7dcfd8fee34e2f785549619bb012d54a"
+  },
+  "limitations": [
+    "First window did not explicitly validate the peer; that result is downgraded, not retroactively qualified.",
+    "Second window explicitly matched AF_QIPCRTR node 0 port 1, transaction, message, length and TLVs.",
+    "Root domain UP is not a direct read of the loader-local SERVREG word or initialization group.",
+    "No fresh PHY/cellular bearer/client internet or persistence test was performed."
+  ]
+}
