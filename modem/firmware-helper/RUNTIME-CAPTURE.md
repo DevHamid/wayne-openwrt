@@ -96,10 +96,19 @@ At the pinned tree, `drivers/platform/msm/ipa/ipa_v2/ipa_qmi_service.c`:
 - `ipa_check_qmi_response()` (line 238) propagates a *bad result* only when
   `ipa_rmnet_ctx.ipa_rmnet_ssr` is set; otherwise it returns 0.
 
-So this panic means the **modem advertised the IPA QMI service but did not
-complete the init-modem-driver request within 60 s** (or the send failed) —
-not that the modem replied "denied". The modem got far enough to register the
-IPA client service and then stalled on the init handshake.
+The retained pstore log resolves the return path: `QMI_IPA_INIT_MODEM_DRIVER_REQ_V01`
+(request 33) returned **`rc = -110` (`-ETIMEDOUT`)** in
+`qmi_init_modem_send_sync_msg()`, then the caller reached `ipa_assert()`. The
+first init request at uptime 833.973 s received a response at 833.985 s. A
+second request began at 948.624 s and timed out at 1009.973 s, about 61.35 s
+later. This is a confirmed timeout, not a non-success QMI response.
+
+Immediately before the second request, pstore records the kernel's service
+locator connection being lost at 946.539 s. That temporal order is a lead, not
+proof that the locator event caused the second IPA QMI service arrival: the
+relevant IPA `new_server` tuple/debug trace is not retained. The root cause of
+the *second request timing out* therefore remains open. The AP-side assert is
+the demonstrated reboot trigger; the failed transaction is now identified.
 
 ## Deliberately not done
 
