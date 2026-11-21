@@ -1,8 +1,8 @@
-# RAM-only TFTP server-check candidate (not live-deployed)
+# RAM-only TFTP server-check (one live Wayne trial)
 
 ## Finding and evidence boundary
 
-The latest read-only device check retained the same boot, modem ONLINE/crash 0,
+The pre-trial read-only device check retained the same boot, modem ONLINE/crash 0,
 the original registry/rmtfs processes and disabled automatic-boot/dump gates.
 The kernel connected to the WLAN notifier at instance 180; WLFW 69 and the PHY
 remain absent. Repeating locator setup is not justified by this evidence.
@@ -76,19 +76,55 @@ The source and static candidate binary digests are recorded in the evidence.
 The shared build recipe remains `build_and_test.py`; pass a real ARM64 compiler
 and QEMU together to execute the target suite rather than silently skipping it.
 
-## Required next experiment (not yet authorized or executed)
+## Early-provider trial
 
-An early-provider comparison requires a clean boot and one newly authorized
-modem acquisition. A late provider launch cannot reconstruct the completed
-startup and has already produced uninformative negative windows in this project.
+The operator supplied a clean boot, and the provider published all ten keys.
+Both collector invocations refused before the modem-start marker because the
+provider had already been running too long. Independent readback confirmed the
+same boot, modem still off, unchanged registry/read-only rmtfs, and neither a
+temporary provider nor any TFTP publication. This was not a WLAN result.
 
-Keep the current boot image/SYSTEM and stable registry services. With confirmed
-physical recovery access and a retained known-good boot backup, arrange one
-watched reboot; verify the modem remains off, publish this candidate from tmpfs
-before one modem start, and observe filename, completed check, authentic image
-opens, WLFW and PHY. Do not restart the nameserver/mapper at observation closeout.
-No general writes, provisioning, radio-mode operations or partition writes are
-included. A reboot/start may still expose another firmware/kernel fault.
+The local [`early-window.sh`](early-window.sh) coordinator stages and verifies
+inputs before starting the provider clock, rechecks scope after publication,
+and schedules snapshots against absolute uptime rather than stacking lookup
+latency onto each sleep. It retains the 360-second provider limit and refuses
+to acquire unless at least 350 seconds remain. The offline fixture covers the
+old refusal, one-shot acquisition and failure/cleanup paths. The coordinator
+is not an armed launcher and is not included in the ROM.
+
+After reauthentication, the approved same boot still showed the never-started
+state (`OFFLINING` with control `offline`), crash count 0, no attempt marker,
+locator present, and no TFTP, WLFW, or PHY. Preflight first refused staging
+because `/proc/mounts` contains two `/tmp` entries. The retry validated the
+visible filesystem with BusyBox `stat -f` (tmpfs magic `1021994`), checked all
+six payload inputs on Wayne, ran the target watchdog against a harmless child,
+and passed the no-socket provider check. Neither staging attempt started the
+provider clock.
+
+The live trial published all ten provider keys before one reserved modem start.
+All 31 samples over 300 seconds showed modem ONLINE, crash count 0 and no PHY.
+The provider accepted one five-byte `server_check.txt` write into process memory
+and logged six RRQs, one successful `wlanmdsp.mbn` open, and two end-of-transfer
+messages. The payload was not recorded; the number of firmware bytes served was
+not independently measured. Three requests were denied by the read-only policy;
+their exact paths are not known from the sanitized capture.
+
+WLFW service 69 (version 1, instance 0, node 0) was present at the first positive
+sample, 11 seconds after the recorded start reservation, and in every remaining
+sample (30 of 31 total). ICNSS logged `QMI Server Connected: state: 0x980`.
+No `WLAN FW is ready` message or Wi-Fi PHY was observed. On the running kernel
+source (`98c685b86d5c7dc0a7983e7010870dd8ed31e2e8`), `icnss.c` registers
+indications after the logged socket connect, then negotiates MSA and capabilities;
+the connect message does not prove any of those transactions completed. The
+first failed or missing ICNSS step remains unknown. This result supports the
+readiness-check hypothesis without proving it is universally required or that
+the denied paths caused the remaining failure.
+
+Independent closeout verified the same boot, unchanged registry/read-only
+rmtfs processes, disabled automatic boot and dumps, no provider publication,
+removed tmpfs staging, and WLFW 69 still present. The modem remains ONLINE;
+this observation did not request modem stop, reboot, flash, partition or SIM
+changes. No AP or routed cellular data was tested.
 
 Precommitted interpretation:
 
