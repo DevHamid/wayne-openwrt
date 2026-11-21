@@ -79,10 +79,13 @@ undefined RCINIT-table symbols. Those file bytes are **not** live root-PD
 memory or proof of the current initialization group. They are not used as
 a fabricated runtime observation.
 
-## Remaining deployment and observation gate
+## Deployment result
 
-**Not yet done:** install/enable this trace, observe a modem-originated loader
-query, decode the loader's live file-check return, or fix WLAN.
+**Done (2026-11-21):** the trace was deployed for one guarded cold start and
+captured a real modem-originated `kernel/elf_loader` query answered with one
+domain, plus a subsequent modem TFTP **WRQ** that the read-only provider
+denied. That window also exposed an AP kernel BUG in
+`ipa_q6_clnt_svc_arrive`. See [RUNTIME-CAPTURE.md](RUNTIME-CAPTURE.md).
 
 The observation must be active **before** the relevant startup. Replacing
 an already-serving mapper now could interrupt the working locator, while
