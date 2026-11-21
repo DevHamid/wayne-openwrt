@@ -18,6 +18,20 @@ class ServerPolicyTest(unittest.TestCase):
   r=self.invoke('no-policy');self.assertEqual(r.returncode,0,r.stderr);self.assertIn('socket_calls=0',r.stdout)
  def test_write_request_is_denied_at_protocol_boundary(self):
   r=self.invoke('wrq');self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+  self.assertIn('error_code=2',r.stdout)
+ def test_denied_write_reports_target_name_without_payload(self):
+  r=self.invoke('wrq');self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+  line=[l for l in r.stdout.splitlines() if l.startswith('readonly_write=denied')]
+  self.assertEqual(len(line),1,r.stderr)
+  self.assertIn('name=/readwrite/server_check.txt',line[0])
+  self.assertRegex(line[0],r'request_len=\d+ name_len=\d+')
+ def test_denied_write_name_is_bounded_and_printable(self):
+  r=self.invoke('wrq-long');self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+  line=[l for l in r.stdout.splitlines() if l.startswith('readonly_write=denied')][0]
+  shown=line.split('name=',1)[1]
+  self.assertLessEqual(len(shown),96)
+  self.assertTrue(all(32 <= ord(c) < 127 for c in shown),shown)
+  self.assertIn('name_len=',line)
  def test_nonfirmware_read_is_denied_without_logging_its_path(self):
   r=self.invoke('denied-rrq');self.assertEqual(r.returncode,0,r.stdout+r.stderr);self.assertNotIn('/readwrite/',r.stderr)
  def test_firmware_rrq_sends_data(self):

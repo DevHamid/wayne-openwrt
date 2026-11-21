@@ -605,7 +605,30 @@ out_close_sock:
 static void handle_wrq(const char *buf, size_t len, struct sockaddr_qrtr *sq)
 {
 	if (translate_readonly_enabled()) {
-		log_info("readonly_write=denied\n");
+		/* Bounded, printable-only echo: identify the write target without
+		 * exporting arbitrary payload bytes. */
+		char shown[97];
+		size_t shift = 0, limit = 0, i, name_len = 0;
+
+		if (len > 2) {
+			const char *start = buf + 2;
+			size_t avail = len - 2;
+
+			name_len = strnlen(start, avail);
+			if (name_len > avail)
+				name_len = avail;
+			limit = name_len;
+			if (limit > sizeof(shown) - 1)
+				limit = sizeof(shown) - 1;
+			for (i = 0; i < limit; i++) {
+				unsigned char c = (unsigned char)start[i];
+
+				shown[shift++] = (c >= 0x20 && c < 0x7f) ? (char)c : '.';
+			}
+		}
+		shown[shift] = '\0';
+		log_info("readonly_write=denied request_len=%zu name_len=%zu name=%s\n",
+			 len, name_len, shown);
 		tftp_send_error_to(sq, TFTP_ERROR_EACCESS, "Read-only firmware policy");
 		return;
 	}

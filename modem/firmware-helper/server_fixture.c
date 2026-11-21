@@ -97,6 +97,17 @@ int main(int argc,char **argv){
   cleanup_readers();printf("readers=%u\n",count);return count==8?0:99;
  }
  if(!strcmp(argv[2],"wrq")){handle_wrq(wrq,sizeof(wrq),&peer);printf("error_code=%u\n",error_code);return error_code==TFTP_ERROR_EACCESS?0:93;}
+ if(!strcmp(argv[2],"wrq-long")){
+  char big[420];size_t i;
+  big[0]=0;big[1]=OP_WRQ;
+  for(i=0;i<300;i++)big[2+i]='a';
+  big[2+300]='\n';big[2+301]='\t';
+  for(i=0;i<40;i++)big[2+302+i]='b';
+  big[2+342]=0;memcpy(big+2+343,"octet",5);big[2+348]=0;
+  handle_wrq(big,(size_t)(2+349),&peer);
+  printf("error_code=%u\n",error_code);
+  return error_code==TFTP_ERROR_EACCESS?0:95;
+ }
  if(!strcmp(argv[2],"denied-rrq")){handle_rrq(denied,sizeof(denied),&peer);return error_code==TFTP_ERROR_EACCESS?0:94;}
  if(!strcmp(argv[2],"truncated-rrq")){for(size_t n=2;n<sizeof(good);n++){handle_rrq(good,n,&peer);assert(data_sends==0);cleanup_readers();}return 0;}
  if(!strcmp(argv[2],"rrq")){handle_rrq(good,sizeof(good),&peer);cleanup_readers();printf("data_sends=%u\n",data_sends);return data_sends==1?0:95;}

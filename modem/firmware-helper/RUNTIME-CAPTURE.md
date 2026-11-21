@@ -41,13 +41,15 @@ not show what the modem did with the reply.
 ```
 readonly_listener_rx bytes=73 profile=1
 readonly_rx=wrq profile=1
-readonly_write=denied
+readonly_write=denied request_len=73 name_len=… name=…
 ```
 
-The modem sent a **TFTP WRQ (write request)** to the firmware service. The
-read-only diagnostic provider denies writes by design, so the request was
-rejected. The 73-byte datagram is consistent with a filename plus mode, but
-the filename was deliberately not exported by this instrument and is not
+The modem sent a **TFTP WRQ (write request)** to the firmware service; the
+read-only provider denies writes by design, so it was rejected. The
+read-only diagnostic now also reports the requested target name, bounded to
+96 printable characters (a follow-up change; the capture above ran the earlier
+build that logged only the denial). The 73-byte datagram is consistent with a
+filename plus mode, but the name from that window was not captured and is not
 asserted here.
 
 This is the first observed modem-originated transfer request in the whole
@@ -78,6 +80,34 @@ progressed far enough to register an IPA client service.
 Consequence: any window that lets the modem run past ~3 minutes currently
 takes the whole AP down. That is a separate defect from the missing WLAN PD
 and must be fixed before longer observation is meaningful.
+
+### Source-verified cause of the assert
+
+At the pinned tree, `drivers/platform/msm/ipa/ipa_v2/ipa_qmi_service.c`:
+
+- `ipa_q6_clnt_svc_arrive()` (line 778) connects to the Q6 IPA QMI endpoint
+  and calls `qmi_init_modem_send_sync_msg()`.
+- Only `-ENETRESET` / `-ENODEV` are treated as SSR and handled. Any **other**
+  nonzero return reaches line 810 `ipa_assert()`, which is a deliberate panic
+  ("requires a kernel panic in order to force dumps").
+- `qmi_init_modem_send_sync_msg()` (line 302) sends
+  `QMI_IPA_INIT_MODEM_DRIVER_REQ_V01` with `QMI_SEND_REQ_TIMEOUT_MS` =
+  **60000 ms** and returns `rc < 0` on send failure or timeout.
+- `ipa_check_qmi_response()` (line 238) propagates a *bad result* only when
+  `ipa_rmnet_ctx.ipa_rmnet_ssr` is set; otherwise it returns 0.
+
+So this panic means the **modem advertised the IPA QMI service but did not
+complete the init-modem-driver request within 60 s** (or the send failed) —
+not that the modem replied "denied". The modem got far enough to register the
+IPA client service and then stalled on the init handshake.
+
+## Deliberately not done
+
+No kernel patch was attempted to convert this panic into a log: that requires
+a CI-built kernel and a flashed boot image, and the assert's own comment says
+it exists to force dumps. Turning it off would let the AP survive longer
+observation, but it changes error semantics and must be decided explicitly.
+
 
 ## Data-loss hazard discovered (and why an earlier restore failed)
 
