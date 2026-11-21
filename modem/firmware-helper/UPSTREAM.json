@@ -1,0 +1,7 @@
+{
+  "repository": "linux-msm/qrtr",
+  "commit": "29e36ae164389580a0f8ea7a7fdb728140ae978d",
+  "path": "lib/qrtr.c",
+  "sha256": "e2aaa6829bb109c22f2b97c6eca8a1cbf6ff4d1c65d5283c83aa58bc89d91391",
+  "kernel_commit": "2f7ff9f51ad6d37e067f32944467f0165eb2dfc9"
+}

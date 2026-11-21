@@ -1,0 +1,28 @@
+{
+  "scope": "Production helper sources and validator copied unchanged from the device-tested candidate; public collector is an unarmed specimen.",
+  "source_sha256": {
+    "source/tqftpserv.c": "3ecd75122d7ce5257a40542e0848780478ba47c033a4ab81145923e0b3f71cd3",
+    "source/translate.c": "d972cae4e5e1da78f7db7b1cbb91da09f4ec8662ff9dd70b174c6ac2689d7c88",
+    "source/translate.h": "2fb78df2515b8efa160e5b42b9bb483a1e3e89040630aebcbc8ae99cd4c02599",
+    "source/qrtr-compat.c": "f9db9132213f76d217e77bc84108c3dd23ab784db20d893aa8af8247e490c721",
+    "verify-profiles.awk": "aaa67c84dc80bdd940cf47f0fb2dcfa04c4423ad1c6db44b04eaa3108a29ee79"
+  },
+  "native_helper_sha256": "6641354d5b3736e10fc71f385705f51ac8e1f12b5644358d610489c0f8144eb7",
+  "native_observation_samples": 12,
+  "native_raw_keys_verified": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10
+  ],
+  "native_unique_data_ports": 10,
+  "native_firmware_file_opens_recorded": 0,
+  "native_wlfw_and_phy": "absent throughout sampled window",
+  "persistent_install": false
+}

@@ -1,0 +1,28 @@
+{
+  "repository": "linux-msm/qrtr",
+  "commit": "6d950d26e50d9ea3607510308fdd653bccc54400",
+  "archive_comparison_mismatches": [],
+  "files": {
+    "LICENSE": "e04f492e71bc5cfe131942eb127c7906d2627831ab910bb894402b476b5d7488",
+    "include/logging.h": "2d5be650fa9881bddfbaa9c116f4454f10921b9db28ec34ea52b44f4932ff274",
+    "include/ns.h": "4c8045f90d3131bf21a78cce14f9cac21983bca7f31925b2640bdd8aee3712a7",
+    "include/libqrtr.h": "32c6fd7e26eaa70086d4af6fa3011ec227e130659125f813ffc51ac833deca1f",
+    "lib/qrtr.c": "e2aaa6829bb109c22f2b97c6eca8a1cbf6ff4d1c65d5283c83aa58bc89d91391",
+    "lib/qmi.c": "dc5e608ed83348a1536b93877596a8bf4a32498e2b740d18f0f7b3a4951cf04b",
+    "lib/logging.c": "a40eb62226579806fd258f0ecd454892f986877f6c3d9acf6ace5c1de5c4f005",
+    "src/ns.c": "a0b0b1a7b28baab9e0063e99e1ebf231187ee6875d6cc20d4a4168d5374e9fbc",
+    "src/waiter.h": "80fb4fa47934caf609bcdef31161d827bf4bb4a03bf9344c150d2a6cb11d49e5",
+    "src/addr.h": "8fe536515360b894074bb0177fbdcb9fd2f22a9cc6cc77e3feab46965ecfc3fc",
+    "src/util.c": "b99362e2811044db54d13fadeedf65478dd46afd2a62263b79eb65a7b71b51e8",
+    "src/waiter.c": "d256081a8e0b787255429d147d57e4c434032e1c94e5ef0a4fd537907c10b41d",
+    "src/map.c": "e33c126e4841e32bfc895befd9f376c7ff44c1d83eba456ea707192d8edc8a54",
+    "src/addr.c": "919ce1b46c1d23038c9e3d1ecd048df9ba0606a5c8ed33d9f20c55492cd45a05",
+    "src/lookup.c": "5dd7666a73dc584fd7c1fb4b34cc3a6cdb6735721865d8446e778cc5c0f46df0",
+    "src/map.h": "0a8d0e708301886a4992851d9cb0b1f7ce2c09dca74e0b354a5cbe8abdf01c80",
+    "src/list.h": "316601b057ef704112cd3f095584354844ef532bc0467e2d4695b706bc74c53e",
+    "src/util.h": "41c303f1e90a454454e58a527a01c9f78b9775abfd83d3d1f16a2d6301533802",
+    "src/hash.h": "e51dc102f4701435b6db27555695d4a8f05d0cfac8d49242266345b79efea688",
+    "src/hash.c": "99dea2e40ce0f5c06e1a2c885c0d1708d6673c66a2ccdeb0e982a6f4f049e61e",
+    "src/cfg.c": "165887aca451fbb86413e800fc4612d4a8dd45a909ff5bed5b6e28e2fd25c1ed"
+  }
+}
