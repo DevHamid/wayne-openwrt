@@ -1,67 +1,69 @@
-# Why the WLAN PD never starts — what is ruled out (2026-11-21)
+# WLAN-PD startup: measured results and scoped exclusions
 
-Read-only source and firmware analysis on the deployed image. No device
-operation was performed for this note; the live facts it cites were measured in
-the windows recorded in `PDR-LISTENER.md` and `RX-OBSERVATION.md`.
+This is source/firmware analysis, not a working WLAN fix. Earlier wording
+(`b1f76c3` and following notes) overstated what service discovery, imports and
+zero provider requests could exclude. The statements below supersede those
+broad exclusions.
 
-## The measured state
+## Measurements retained
 
-`msm/modem/wlan_pd` reports **UNINIT** (`0x7fffffff`) on notifier registration,
-QMI restart is refused with `result 1 / error 9`, WLFW service 69 never appears,
-no PHY exists, and the read-only provider receives no TFTP opcode at all while
-its receive path verifiably runs. The modem is ONLINE with crash count 0 and all
-30 deployed modem/WLAN firmware files match the saved source set.
+The separately recorded [listener trial](PDR-LISTENER.md) registered
+`msm/modem/wlan_pd` successfully and received **UNINIT** (`0x7fffffff`). The
+same socket then sent one restart, which returned **result 1 / error 9** with
+the provider verified alive. This rejects missing listener registration alone
+as the explanation for that refusal. It does not establish the refusal's cause.
 
-Taken together: the modem never reaches the point of asking for `wlanmdsp.mbn`,
-so the failure is before firmware delivery, not in it.
+The [provider observation](RX-OBSERVATION.md) discovered all ten reviewed
+service-4096 keys and exercised its receive loop. No TFTP opcode or firmware
+open was observed there during the bounded window; WLFW 69 and PHY were also
+absent. Selected deployed firmware files matched the saved source set.
+These observations do not trace every transport, earlier startup attempt or
+modem-internal operation.
 
-## Ruled out by source, at the pinned revision
+## What the inspected paths exclude, and what they do not
 
-1. **The AP-side locator map is not the gap.** The modem's process-domain
-   manager asks the AP for a domain by *service* name (SERVREG_LOC service
-   `0x40`, `GET_DOMAIN_LIST` request `0x20`, `name` in TLV 1) and the AP answers
-   with the owning domain and instance. `pd-mapper.c` matches on
-   `pd_map->service`, and our map set already answers `wlan/fw ->
-   msm/modem/wlan_pd, instance 180`. A missing map entry would have produced no
-   answer at all, which is not what we observe.
-2. **`pm-service` is not a PD starter.** It is the Android peripheral-manager
-   broker (`vendor.qcom.PeripheralManager`): a Binder service plus a **QMI CSI
-   server** for clients such as `cnss-daemon` (which calls
-   `pm_client_register`/`pm_client_connect`). Its only QMI symbols are
-   server-side (`qmi_csi_register_with_options`, `qmi_csi_send_resp/ind`,
-   `common_qmi_idl_type_table_object_v01`). It tracks and votes peripheral
-   state and relays restart requests between clients; it does not issue a modem
-   QMI request that would create a PD. Porting it alone would not start `wlan_pd`.
-3. **The kernel has no cold-start path.** `icnss_trigger_recovery()` is reached
-   only from the debugfs node (`test_mode 3`), requires `ICNSS_PDR_REGISTERED`
-   and an existing notifier handle, and calls `service_notif_pd_restart()` with
-   the already-registered domain. That is byte-for-byte the request we sent
-   directly, and the modem refused it. There is no exported or sysfs entry point
-   that spawns a PD that is not already running.
-4. **The modem image already knows what it would need.** `MODEM.B17` carries
-   `msm/modem/wlan_pd`, `wlan_process`, `wlanmdsp.mbn`, `eloader-%s`,
-   `/readonly/firmware/image/%s` and `/readonly/vendor/firmware/%s`, plus
-   `USERPD is not present in DEFAULT path` / `... in VENDOR path`. So the domain
-   name, the user-PD process name and the RFS path template are embedded; the
-   PD image name does not have to come from the AP.
+1. **The tested `wlan/fw` map is present.** The AP kernel's reviewed locator
+   client requests a service-name mapping from the AP mapper; the validated
+   reply supplies `msm/modem/wlan_pd`, instance 180. Missing that particular
+   entry would produce a success response with a zero-domain list, not the
+   observed mapping. This does not certify all possible startup queries or
+   inputs. Numeric QRTR services and SERVREG names are different namespaces.
+2. **The inspected peripheral broker is not a demonstrated modem client.**
+   `pm-service` exposes Binder and QMI CSI server APIs; its inspected imports
+   do not establish a modem-side QMI startup request. That is no reason to port
+   the broker speculatively. Server-only QMI imports do not, however, exclude
+   every non-QMI side effect, indirect device vote or action of another daemon.
+3. **The reviewed recovery path is not a proven cold-start API.**
+   `icnss_trigger_recovery()` requires existing PDR registration and forwards
+   `service_notif_pd_restart()` for the registered domain. The direct trial
+   tested that protocol operation and was rejected. This is an exclusion of
+   that proposed recovery shortcut, not proof that no cold-start path exists
+   anywhere in the kernel or firmware.
+4. **The saved firmware includes the WLAN loader's names and setup code.**
+   `MODEM.B17` has the domain, process/image names and default/vendor path
+   templates. The subsequent [initialization inspection](ELOADER-INIT.md)
+   identifies an `eloader_init`-named descriptor referencing the WLAN setup
+   routine. Static presence is not execution; these strings neither prove
+   that nothing asked for the image nor select RFSA over TFTP.
 
-## The remaining unknown
+## Remaining unknown and next discriminant
 
-Something that should make the modem's root PD (TMS) spawn the `wlan_pd` user PD
-does not happen on this build. The candidate space is now narrow:
+No observed transaction or runtime trace yet identifies why WLAN firmware
+service 69 fails to become available. Candidate mechanisms include skipped
+initialization, an unmet prerequisite, an unobserved loader attempt/failure,
+or notifier-name/state behavior that needs further explanation.
 
-- a boot-time condition inside the modem (a TMS/PD configuration input the AP
-  never supplies, or one it supplies late), or
-- an AP-side request that stock Android makes and we do not.
+The next safe source step is to resolve the `eloader_init` descriptor consumer
+and its early predicates, then compare with the working Android reference.
+Continuous QRTR announcement capture during a separately authorized cold
+start could catch a transient **numeric service** such as WLFW 69; it would
+not directly enumerate SERVREG `kernel/elf_loader` names or explain all
+internal failures. No cold start is necessary merely to inspect the saved
+initialization tables.
 
-Neither is reachable by static analysis of the files we already hold; the
-distinguishing observation is a modem cold start with continuous QRTR
-announcement capture, to see whether `wlan_pd`'s services (`elf_loader`,
-`servreg`) or WLFW 69 appear even briefly before disappearing.
-
-## What this note does not claim
-
-It does not identify the root cause, does not prove stock Android starts the PD
-the same way, and does not validate any fix. It removes four candidate causes so
-no further work is spent on them: provider timing, provider protocol coverage,
-locator/map completeness, and a missing kernel/userspace restart API.
+Do not replay the rejected restart, rebuild for the retracted
+[QCOM_RMTFS_MEM theory](RFSA-DISABLED.md), fabricate calibration or infer a
+firmware transport from a path string. Provider timing/coverage were tested
+in their recorded windows, not universally proved correct for all startup
+conditions. Cellular bearer/IP/NAT, Wi-Fi-client internet and persistent
+configuration remain unverified.

@@ -1,64 +1,50 @@
-# DIAG as the read-only window into wlan_pd startup — 2026-11-21 UTC
+# DIAG observation: topology verified, capture method unqualified
 
-No modem restart, no power change, no writes. All observations below are from
-read-only commands on the running image.
+**Correction to commit `841bb608e5214493b63a729d465b56dce6a505c8`:** the
+previous version mislabeled all DIAG rows as AP-local and described log-mask
+changes as passive. No DIAG socket, mask change, log-clear command or raw
+DIAG capture was executed by this investigation.
 
-## What exists
+## Saved observations
 
-- `/dev/diag` — character device `237:0`, mode `0600 root:root`.
-- QRTR service **4097 (DIAG)** is published with **23 transports**, all on the
-  AP (node 1):
+- `/dev/diag` exists (`237:0`, `0600 root:root` in the saved readback).
+- [SERVICE-TABLE-RAW.txt](SERVICE-TABLE-RAW.txt) contains **23 service-4097
+  endpoint rows**, not 23 AP endpoints:
+  - Node **0**: instance 1 / port 29 (MODEM:CMD), instance 3 / port 32
+    (MODEM:DCI_CMD).
+  - Node **1**: 21 rows, including MODEM:CNTL / DATA / DCI and
+    WCNSS:CNTL / DATA / DCI (instances 128 / 130 / 132).
+- The saved table does **not** contain node-0 instance 2 / port 26. That
+  row in the previous note was invented and is withdrawn.
 
-| instance | port | transport |
-|---|---|---|
-| 1 / 2 / 3 | 29 / 26 / 32 | MODEM:CMD / MODEM:DATA / MODEM:DCI_CMD |
-| 0 | 16440 | MODEM:CNTL |
-| 128 / 130 / 132 | 16436 / 16421 / 16422 | **WCNSS:CNTL / WCNSS:DATA / WCNSS:DCI** |
-| 64 / 66 / 68 | 16438 / 16419 / 16420 | LPASS:CNTL / LPASS:DATA / LPASS:DCI |
-| 256 / 258 / 260 | 16447 / 16427 / 16428 | CDSP:* |
-| 320 / 322 / 324 | 16446 / 16425 / 16426 | WDSP:* |
-| 192 / 194 / 196 | 16445 / 16423 / 16424 | SENSORS:* |
-| 384 / 386 / 388 | 16416 / 16429 / 16430 | unnamed CNTL/DATA/DCI |
+In inspected kernel commit `33647babe2a652c201fb9f87639363ef7cf28cf2`,
+`drivers/char/diag/diagfwd_socket.c` defines the peripheral/channel instance
+bases and `socket_open_server()` (483–536) creates and publishes AP server
+sockets. `__socket_close_channel()` (538–568) explicitly retains servers.
+Therefore a local WCNSS diagnostic endpoint is not proof that a remote WLAN
+PD is alive or that a subscriber will receive historical startup logs.
+This reference checkout does not establish the installed kernel's exact SHA.
 
-- Kernel diag driver is active; latest `dmesg` line:
-  `diag: In diag_send_feature_mask_update, control channel is not open, p: 0`
+## Unresolved before any live DIAG use
 
-## Why this is the next lever
+- Trace the exact kernel driver's supported userspace read/ioctl protocol,
+  ownership and peer handling before attaching. Do not treat connecting a
+  random QRTR socket to an AP control endpoint as a passive broadcast tap.
+- Reading masks and changing masks are different operations. Enabling F3
+  changes diagnostic state and is not a read-only probe. It needs a qualified
+  protocol/cleanup plan and appropriate authorization.
+- It is unproven that the missing WLAN startup reason is emitted as an
+  accessible F3 message, currently enabled, buffered, or recoverable after
+  startup. DIAG existence alone establishes none of those.
+- Raw diagnostic frames can contain subscriber/device identifiers and payload
+  data. Do not dump them into shared output. Any justified capture needs
+  bounded duration, a narrow allowlist, private storage and sanitization.
 
-The modem prints its own reason for not starting `wlan_pd` as F3/debug
-messages. Those messages leave the subsystem through the DIAG stream, and the
-**WCNSS:DATA / WCNSS:DCI** transports exist precisely to carry WLAN
-subsystem debug. Every AP-side observation so far can only tell us *that*
-WLFW is absent; DIAG can tell us *why* — which is the question everything else
-has failed to answer.
+The earlier assertion that no stock RFS userspace daemon exists was also
+unsupported: the stock image listing included `rmt_storage`. Service 14 in
+this OpenWrt setup is published by the reviewed userspace rmtfs source;
+see [RFSA-DISABLED.md](RFSA-DISABLED.md) for the corrected memory/firmware
+separation. Backing symlinks do not establish NV validity.
 
-This is the same class of operation as the earlier passive `rx-observe` work:
-attach, listen, detach. Nothing is restarted, no state is changed.
-
-## Sketch of a passive listener (not yet built)
-
-1. `socket(AF_QIPCRTR, SOCK_DGRAM, 0)`, `bind()` an ephemeral port.
-2. Attach to the WCNSS:CNTL transport (service 4097, instance 128, node 1,
-   port 16436) reusing the socket/connect path already proven in
-   `service-notifier.c` / `pdr_restart.c`.
-3. Send the minimum harmless setup: read the enabled log mask first; enable
-   F3 output only if it is off. No SSR commands, no event-log clears.
-4. Dump every inbound frame (hex + decoded DIAG header) with timestamps.
-5. Detach by closing the socket; verify the process is gone.
-
-## Explicitly out of scope while doing this
-
-Anything that can trigger a subsystem restart or reset, and anything that
-writes to the modem: the DIAG SSR/restart command, "SSR ready", log clear,
-and mask writes beyond enabling F3.
-
-## Relationship to earlier dead ends
-
-- EFS is authentic: `/tmp/wayne-rmtfs` backing files are symlinks to the real
-  partitions `modemst1=p46`, `modemst2=p47`, `fsg=p45`, `fsc=p3`, served
-  read-only. A missing/blank modem NV is ruled out, not assumed.
-- No separate RFS userspace daemon exists in the stock vendor image (only
-  `tftp_server`), so RFS is kernel-provided on both stock and this build.
-- `subsystem_restart` parameters on the running image: `enable_debug=0`,
-  `enable_ramdumps=0`, `enable_mini_ramdumps=0`, `max_restarts=0`,
-  `disable_restart_work=0`; cmdline carries `service_locator.enable=1`.
+DIAG remains a possible diagnostic avenue, **not an implemented listener or
+an observed explanation** of the WLAN startup failure.

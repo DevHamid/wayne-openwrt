@@ -1,52 +1,76 @@
-# RFSA disabled — root cause and next fix path
+# Retracted: missing QCOM_RMTFS_MEM is not an established WLAN cause
 
-## Root cause (2026-11-21 T08:30Z)
+**Correction to commit `841bb608e5214493b63a729d465b56dce6a505c8`:** the
+previous version incorrectly called `CONFIG_QCOM_RMTFS_MEM=n` the confirmed
+root cause and recommended rebuilding/flashing. That recommendation is
+withdrawn. No such kernel change or flash was performed during this audit.
 
-| Component | Stock Android | Our OpenWrt | Status |
-|---|---|---|---|
-| `QCOM_RMTFS_MEM` | `y` (built-in or module) | `n` | ❌ |
-| RFSA driver | Active → exposes `/readonly/firmware/image/` | Inactive → service 14 stub | ❌ |
-| ELF loader path | `/readonly/firmware/image/wlanmdsp.mbn` | same, but unreachable | ❌ |
+## What the source actually implements
 
-## Evidence
+At inspected kernel commit `33647babe2a652c201fb9f87639363ef7cf28cf2`,
+`drivers/soc/qcom/rmtfs_mem.c` implements a **shared-memory character device**:
 
-1. `modemuw.jsn` declares `wlan_pd` with `provider: kernel`, `service: elf_loader`
-2. ELF loader searches `/readonly/firmware/image/wlanmdsp.mbn` (DEFAULT) or `/readonly/vendor/firmware/wlanmdsp.mbn` (VENDOR)
-3. `hex-c19165c0.txt` and `MODOM-STRING-XREFS.json` confirm these paths
-4. `CONFIG_QCOM_RMTFS_MEM` is listed in `drivers/soc/qcom/Kconfig` (lines 232-242) with text "Say y here if you intend to boot the modem remoteproc"
-5. `CONFIG_QCOM_RMTFS_MEM=n` in our kernel config (confirmed by grep on running: `CONFIG_QCOM_RMTFS_MEM is not set`)
+- `qcom_rmtfs_mem_fops` (lines 135–142) supplies open/read/write/release/seek.
+- Probe (153–236) maps reserved memory, creates `qcom_rmtfs_mem<client-id>`
+  and optionally assigns memory permissions through SCM.
+- Its match is `qcom,rmtfs-mem` (265–268). It contains no firmware-path
+  translator or QRTR service publisher. Enabling it cannot by itself expose
+  `/readonly/firmware/image/` or turn service 14 into a firmware-file server.
 
-## Why there's no TFTP
+This source checkout is a reference, not proof of the installed kernel's exact
+revision. The vendor `/proc/config.gz` is known to be a potentially foreign
+embedded blob; it does not establish the installed resolved configuration.
+Neither the stock Android symbol value nor a sole missing-driver cause was
+established by the previous note.
 
-The modem's WLAN PD is NOT loaded by `tftp_server` (service 4096). It is loaded by the kernel's ELF loader (`eloader`) via RFSA. Service 4096 exists only for other subsystems (ADSP, CDSP) on stock Android. Our OpenWrt has no `tftp_server` — irrelevant.
+The project's `scripts/build-rmtfs.sh` pins `linux-msm/rmtfs` to
+`b30a3eb38f9af283f18dbd3c7755653efc52c094`. In that source:
 
-## OpenWrt kernel config fix
+- [`sharedmem.c` lines 268–313](https://github.com/linux-msm/rmtfs/blob/b30a3eb38f9af283f18dbd3c7755653efc52c094/sharedmem.c#L268-L313)
+  explicitly falls back from `/dev/qcom_rmtfs_mem1` to UIO when the former
+  returns ENOENT. Lines 124–190 open/map the UIO backend.
+- [`rmtfs.c` lines 24, 425–447](https://github.com/linux-msm/rmtfs/blob/b30a3eb38f9af283f18dbd3c7755653efc52c094/rmtfs.c#L425-L447)
+  define service 14 and publish it from userspace on port 14.
+- That service exchanges storage sectors through shared memory. It is not
+  the separate service-4096 TFTP firmware namespace.
 
-In the kernel config (`arch/arm64/configs/wayne_defconfig` or similar):
+A fresh read-only Wayne check found the existing `rmtfs` running with
+`-r -P -o /tmp/wayne-rmtfs -v`, holding `/dev/uio0`, whose name is `rmtfs`
+and map size is `0x200000`. Service 14 was discovered at node 1 / port 14.
+These observations support an active UIO-backed daemon, not the claim that
+service 14 is an inert kernel stub. They do not certify every storage RPC.
 
-```
-# Enable RFSA so modem can read firmware via RFS service
-CONFIG_QCOM_RMTFS_MEM=y   # or =m
+## Other withdrawn conclusions
 
-# Modem boot driver also needs it
-CONFIG_QCOM_MODEM_BOOT=y  # already enabled, but depends on rmtfs_mem
-```
+- `modemuw.jsn` describes the **remote modem protection domain** and its
+  `kernel/elf_loader` service. The word `kernel` there does not identify an
+  AP Linux driver or a dependency on `QCOM_RMTFS_MEM`.
+- `/readonly/firmware/image/%s` and the vendor-path fallback are confirmed
+  modem strings. Strings alone do not select RFSA rather than QRTR TFTP;
+  the reviewed `tqftpserv` translator supports those same paths.
+- TFTP is **not established as irrelevant** to MPSS/WLAN, and the existence
+  of a firmware file on the AP does not prove delivery. Conversely, the
+  early-provider and receive-path trials did not observe a client request.
+- `QCOM_MODEM_BOOT` was not shown to depend on `QCOM_RMTFS_MEM`; the inspected
+  Kconfig declares PIL and subsystem-restart dependencies.
+- There is no demonstrated rule that changing service 14 to port 0 fixes
+  firmware access. Ports are addresses, not capability flags.
+- Existing backing symlinks/hashes do not prove EFS/NV is valid or nonblank.
+  No EFS/NV repair or additional protected-partition read is prescribed.
 
-## Next step (requires kernel rebuild + GitHub Actions)
+## Established failing gate and next investigation
 
-1. Edit kernel config to enable `CONFIG_QCOM_RMTFS_MEM=y`
-2. Commit and push to trigger `build-kernel.yml`
-3. Flash new boot.img via `AnyKernel3` zip
-4. Verify RFSA appears in qrtr-lookup (service 14 now has port 0 → file server)
-5. Test wlan_pd spawn (may still need rmtfs `-P` path adjustments)
+The [registered-listener trial](PDR-LISTENER.md) already completed the proposed
+same-socket sequence: listener `0x0020` succeeded with **UNINIT**; restart
+`0x0024` returned **result 1 / error 9**, despite a verified live provider.
+Repeating that request or rebuilding for an unproven memory-driver theory
+would not distinguish a new hypothesis.
 
-## Alternative: userspace workaround
+A fresh read-only baseline still has modem ONLINE / crash count 0, locator 64
+and notifier 66 present, WLFW 69 absent, and no PHY. Automatic modem boot and
+both dump gates remain disabled. The pocket-modem goal is **not complete**.
 
-If kernel rebuild is too slow, run `rmtfs` with the RFSA mode enabled via module parameter? The driver auto-configures when built with `CONFIG_QCOM_RMTFS_MEM=y`. No viable userspace substitute.
-
-## What this means for the project
-
-- Wi-Fi is not "broken" — the firmware path wasn't available
-- Enabling RFSA enables the missing bridge
-- This is the final AP-side blocker; no other code changes needed in OpenWrt userspace
-- The goal ("pocket modem") remains achievable
+Continue tracing the modem-side loader's initialization and its prerequisites;
+keep static reachability, actual execution, firmware transfer and Wi-Fi
+readiness separate. See [ELOADER-INIT.md](ELOADER-INIT.md). This correction is
+not a new ROM, verified WLAN fix, or instruction to flash.

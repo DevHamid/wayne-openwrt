@@ -54,11 +54,14 @@ explanation is not supported for those files.
 
 - The provider was reachable, published, and its receive path executed during
   the window.
-- No TFTP request of any opcode reached it. The modem-side loader therefore did
-  not try to fetch `wlanmdsp.mbn` from this provider in this window.
-- Combined with `msm/modem/wlan_pd` reporting **UNINIT** and WLFW never
-  appearing, the failure is upstream of firmware delivery: the WLAN protection
-  domain is not running, so nothing requests its image.
+- No TFTP request of any opcode reached this provider during the window.
+  That is not a trace of every modem-side file access or earlier load attempt.
+- Combined with the queried domain reporting **UNINIT** and no WLFW
+  advertisement in the samples, this prioritizes loader initialization and
+  prerequisites. It does not distinguish skipped initialization from a prior
+  failure, another file-access route, or notifier-state semantics. The later
+  [eloader initialization lead](ELOADER-INIT.md) is static evidence, not proof
+  that the callback ran or that no firmware request was ever issued.
 
 ## What this does not establish
 

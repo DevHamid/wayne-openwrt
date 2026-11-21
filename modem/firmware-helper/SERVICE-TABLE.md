@@ -38,12 +38,13 @@ Control (43).
 - **Correction:** an earlier note recorded that the post-power-up table
   "contains 66 … and no 69". That was a filtered observation, not a full table.
   The modem actually publishes 40 services; the claim is corrected here.
-- The modem-side QRTR stack, PD accounting for the normal services, and the
-  modem→AP link are all healthy. The missing WLAN pieces are **specific** to
-  `wlan_pd`, not a symptom of a broken modem subsystem.
-- No service on the modem advertises itself as a PD/loader trigger (no
-  `tms`/`elf_loader`/`peripheral` entry at node 0), so there is no obvious
-  modem-side QMI opoint to ask for a PD start.
+- Discovery shows many modem service advertisements reach the AP; WLFW 69
+  is absent from this snapshot. This is not a full modem/PD health check or
+  proof that every expected service except WLFW exists.
+- QRTR numeric service advertisements and SERVREG names (`kernel/elf_loader`,
+  `tms/servreg`) are different namespaces. A nameserver snapshot cannot establish
+  the absence of a loader/start operation inside an advertised service, nor
+  show whether a firmware initialization callback ran.
 
 ## Not established
 
