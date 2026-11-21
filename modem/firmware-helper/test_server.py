@@ -12,6 +12,24 @@ class ServerPolicyTest(unittest.TestCase):
    result=subprocess.run([command,str(root),case],capture_output=True,text=True,timeout=5)
    self.assertFalse((root/'server_check.txt').exists())
    return result
+ def test_check_read_returns_only_the_received_ram_bytes(self):
+  r=self.invoke('ramcheck-readback');self.assertEqual(r.returncode,0,r.stdout+r.stderr);self.assertIn('check_reads=1 errors=0',r.stdout)
+ def test_check_rejects_duplicate_negotiation_options(self):
+  r=self.invoke('ramcheck-duplicate-option');self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+ def test_check_vendor_options_complete_without_disk_writes(self):
+  r=self.invoke('ramcheck-vendor-options');self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+ def test_check_retains_default_deny_for_other_paths(self):
+  r=self.invoke('ramcheck-other-path');self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+ def test_check_request_budget_is_bounded(self):
+  r=self.invoke('ramcheck-cap');self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+ def test_check_invalid_packets_cannot_commit_data(self):
+  for fault in ('timeout','node','port','family','sockaddr','short','oversize','block','opcode'):
+   with self.subTest(fault=fault):
+    r=self.invoke('ramcheck-fault-'+fault);self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+ def test_opt_in_check_write_is_acked_without_creating_a_file(self):
+  r=self.invoke('ramcheck-write');self.assertEqual(r.returncode,0,r.stdout+r.stderr);self.assertIn('check_acks=1 errors=0',r.stdout)
+ def test_ramcheck_opt_in_validates_without_socket_or_file_creation(self):
+  r=self.invoke('ramcheck-validate');self.assertEqual(r.returncode,0,r.stdout+r.stderr);self.assertIn('socket_calls=0',r.stdout)
  def test_validate_exits_before_socket(self):
   r=self.invoke('validate');self.assertEqual(r.returncode,0,r.stderr);self.assertIn('socket_calls=0',r.stdout)
  def test_missing_readonly_policy_refuses_before_socket(self):

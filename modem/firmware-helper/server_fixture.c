@@ -7,6 +7,10 @@
 static unsigned socket_calls, data_sends, error_code, received;
 static int nextfd=100;
 static int bulk_mode;
+static int check_mode;
+static unsigned check_acks, check_reads;
+static unsigned check_send_timeouts;
+static const char *check_fault;
 static size_t bulk_received;
 static unsigned last_block,large_allocations;
 static unsigned published,closed_sockets;
@@ -18,11 +22,11 @@ void *__wrap_calloc(size_t n,size_t size){if(size && n>1048576/size){large_alloc
 int __wrap_socket(int domain,int type,int protocol){assert(domain==AF_QIPCRTR);socket_calls++;if(fail_socket && socket_calls==4){errno=EMFILE;return -1;}if(high_socket)return FD_SETSIZE;return nextfd++;}
 int __wrap_bind(int fd,const struct sockaddr *addr,socklen_t len){return 0;}
 int __wrap_connect(int fd,const struct sockaddr *addr,socklen_t len){return 0;}
-int __wrap_setsockopt(int fd,int level,int opt,const void *v,socklen_t len){return 0;}
+int __wrap_setsockopt(int fd,int level,int opt,const void *v,socklen_t len){if(check_mode && opt==SO_SNDTIMEO){const struct timeval *tv=v;assert(level==SOL_SOCKET && len==sizeof(*tv) && tv->tv_sec==2 && tv->tv_usec==0);check_send_timeouts++;}return 0;}
 int __wrap_getsockname(int fd,struct sockaddr *addr,socklen_t *len){struct sockaddr_qrtr q={.sq_family=AF_QIPCRTR,.sq_node=1,.sq_port=16480+(unsigned)(fd-100)};memcpy(addr,&q,sizeof(q));*len=sizeof(q);return 0;}
 extern int __real_close(int fd);
 int __wrap_close(int fd){if(fd>=100){assert(fd<1124 && !closed_seen[fd-100]++);closed_sockets++;return 0;}return __real_close(fd);}
-ssize_t __wrap_send(int fd,const void *data,size_t len,int flags){const unsigned char *p=data;assert(len>=4);unsigned op=(p[0]<<8)|p[1];if(op==OP_DATA){data_sends++;if(bulk_mode){unsigned b=(p[2]<<8)|p[3];assert(b==last_block+1);last_block=b;for(size_t i=4;i<len;i++)assert(p[i]==(bulk_received+i-4)%251);bulk_received+=len-4;}}if(op==OP_ERROR)error_code=(p[2]<<8)|p[3];return len;}
+ssize_t __wrap_send(int fd,const void *data,size_t len,int flags){const unsigned char *p=data;assert(len>=4);unsigned op=(p[0]<<8)|p[1];if(check_mode==2 && op==OP_DATA){assert(len==9 && !memcmp(p+4,"hello",5));check_reads++;}if(check_mode && op==OP_ACK && p[2]==0 && p[3]==1)check_acks++;if(op==OP_DATA){data_sends++;if(bulk_mode){unsigned b=(p[2]<<8)|p[3];assert(b==last_block+1);last_block=b;for(size_t i=4;i<len;i++)assert(p[i]==(bulk_received+i-4)%251);bulk_received+=len-4;}}if(op==OP_ERROR)error_code=(p[2]<<8)|p[3];return len;}
 ssize_t __wrap_sendto(int fd,const void *data,size_t len,int flags,const struct sockaddr *addr,socklen_t alen){
  const struct sockaddr_qrtr *peer=(const void *)addr;
  if(peer->sq_port==QRTR_PORT_CTRL && len==sizeof(struct qrtr_ctrl_pkt)){
@@ -40,6 +44,21 @@ int __wrap_select(int nfds,fd_set *r,fd_set *w,fd_set *e,struct timeval *t){if(f
 ssize_t __wrap_recvfrom(int fd,void *buf,size_t len,int flags,struct sockaddr *addr,socklen_t *alen){
  last_listener=fd;
  struct sockaddr_qrtr q={.sq_family=AF_QIPCRTR,.sq_node=0,.sq_port=900};
+ if(check_mode && check_fault){
+  if(!strcmp(check_fault,"timeout")){errno=EAGAIN;return -1;}
+  unsigned char packet[80]={0,OP_DATA,0,1,'h','e','l','l','o'};size_t n=9;
+  if(!strcmp(check_fault,"node"))q.sq_node=1;
+  if(!strcmp(check_fault,"port"))q.sq_port++;
+  if(!strcmp(check_fault,"family"))q.sq_family=AF_UNIX;
+  if(!strcmp(check_fault,"short"))n=3;
+  if(!strcmp(check_fault,"oversize"))n=70;
+  if(!strcmp(check_fault,"block"))packet[3]=2;
+  if(!strcmp(check_fault,"opcode"))packet[1]=OP_ACK;
+  memcpy(addr,&q,sizeof(q));*alen=!strcmp(check_fault,"sockaddr")?1:sizeof(q);
+  memcpy(buf,packet,n<len?n:len);return n;
+ }
+ if(check_mode==2){const unsigned char packet[]={0,OP_ACK,0,1};assert(len>=sizeof(packet));memcpy(addr,&q,sizeof(q));*alen=sizeof(q);memcpy(buf,packet,sizeof(packet));return sizeof(packet);}
+ if(check_mode){const unsigned char packet[]={0,OP_DATA,0,1,'h','e','l','l','o'};assert(len>=sizeof(packet));memcpy(addr,&q,sizeof(q));*alen=sizeof(q);memcpy(buf,packet,sizeof(packet));return sizeof(packet);}
  if(bulk_mode){unsigned char *p=buf;memcpy(addr,&q,sizeof(q));*alen=sizeof(q);p[0]=0;p[1]=OP_ACK;p[2]=last_block>>8;p[3]=last_block&255;return 4;}
  if(received++){errno=ENETRESET;return -1;}
  if(rx_case && !strcmp(rx_case,"listen-rx-rrq")) {
@@ -73,10 +92,38 @@ int main(int argc,char **argv){
   if(select_last && last_listener!=109)return 107;
   return (fail_select?rc!=0:rc==-ENETRESET)?0:108;
  }
+ if(!strcmp(argv[2],"ramcheck-validate")){char *args[]={"tqftpserv","-r",argv[1],"-c","-n",NULL};int rc=upstream_main(5,args);printf("socket_calls=%u\n",socket_calls);return rc;}
  if(!strcmp(argv[2],"no-policy")){char *args[]={"tqftpserv",NULL};int rc=upstream_main(1,args);printf("socket_calls=%u\n",socket_calls);return rc!=0?0:90;}
  if(!strcmp(argv[2],"validate")){char *args[]={"tqftpserv","-r",argv[1],"-n",NULL};int rc=upstream_main(4,args);printf("socket_calls=%u\n",socket_calls);return rc;}
  if(!strcmp(argv[2],"short-error")){char *args[]={"tqftpserv","-r",argv[1],NULL};int rc=upstream_main(3,args);return rc==-ENETRESET?0:91;}
  if(translate_set_readonly_dir(argv[1])<0)return 92;
+ if(!strncmp(argv[2],"ramcheck-fault-",15)){
+  ramcheck_enabled=true;check_mode=1;check_fault=argv[2]+15;
+  handle_wrq(wrq,sizeof(wrq),&peer);
+  printf("check_acks=%u present=%d sockets=%u closed=%u\n",check_acks,ramcheck_present,socket_calls,closed_sockets);
+  return check_acks==0 && !ramcheck_present && socket_calls==closed_sockets?0:111;
+ }
+ if(!strcmp(argv[2],"ramcheck-cap")){
+  ramcheck_enabled=true;check_mode=1;for(unsigned n=0;n<9;n++)handle_wrq(wrq,sizeof(wrq),&peer);
+  return check_acks==8 && error_code==2 && socket_calls==closed_sockets?0:112;
+ }
+ if(!strcmp(argv[2],"ramcheck-duplicate-option")){
+  const char request[]="\0\2/readwrite/server_check.txt\0octet\0blksize\0" "512\0blksize\0" "7680";
+  ramcheck_enabled=true;check_mode=1;handle_wrq(request,sizeof(request),&peer);
+  return check_acks==0 && !ramcheck_present && error_code==2?0:113;
+ }
+ if(!strcmp(argv[2],"ramcheck-vendor-options")){
+  const char request[]="\0\2/readwrite/server_check.txt\0octet\0blksize\0" "7680\0timeoutms\0" "200\0wsize\0" "10";
+  ramcheck_enabled=true;check_mode=1;handle_wrq(request,sizeof(request),&peer);
+  return check_acks==1 && ramcheck_size==5 && socket_calls==closed_sockets?0:114;
+ }
+ if(!strcmp(argv[2],"ramcheck-other-path")){
+  const char request[]="\0\2/readwrite/../server_check.txt\0octet";
+  ramcheck_enabled=true;check_mode=1;handle_wrq(request,sizeof(request),&peer);
+  return check_acks==0 && error_code==2 && !ramcheck_present?0:115;
+ }
+ if(!strcmp(argv[2],"ramcheck-readback")){ramcheck_enabled=true;check_mode=1;handle_wrq(wrq,sizeof(wrq),&peer);check_mode=2;handle_rrq(denied,sizeof(denied),&peer);printf("check_reads=%u errors=%u\n",check_reads,error_code);return check_reads==1 && error_code==0?0:110;}
+ if(!strcmp(argv[2],"ramcheck-write")){ramcheck_enabled=true;check_mode=1;handle_wrq(wrq,sizeof(wrq),&peer);printf("check_acks=%u errors=%u send_timeouts=%u\n",check_acks,error_code,check_send_timeouts);return check_acks==1 && error_code==0 && check_send_timeouts==1?0:109;}
  if(!strcmp(argv[2],"rrq-bulk")){
   const char request[]="\0\1/readonly/firmware/image/wlanmdsp.mbn\0octet\0blksize\0" "7680\0wsize\0" "10\0rsize\0" "1048577\0seek\0" "0";
   bulk_mode=1;handle_rrq(request,sizeof(request),&peer);

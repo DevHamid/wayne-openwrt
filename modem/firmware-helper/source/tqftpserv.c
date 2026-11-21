@@ -80,6 +80,7 @@ struct tftp_client {
 };
 
 static bool tftp_debug;
+static bool ramcheck_enabled;
 
 static struct list_head readers = LIST_INIT(readers);
 static struct list_head writers = LIST_INIT(writers);
@@ -414,8 +415,12 @@ static int parse_options(const char *buf, size_t len, size_t *blksize,
 	return 0;
 }
 
+#include "ramcheck.h"
+
 static void handle_rrq(const char *buf, size_t len, struct sockaddr_qrtr *sq)
 {
+	if (handle_ramcheck(buf, len, sq))
+		return;
 	struct tftp_client *client;
 	const char *filename;
 	const char *mode;
@@ -604,6 +609,8 @@ out_close_sock:
 
 static void handle_wrq(const char *buf, size_t len, struct sockaddr_qrtr *sq)
 {
+	if (handle_ramcheck(buf, len, sq))
+		return;
 	if (translate_readonly_enabled()) {
 		/* Bounded, printable-only echo: identify the write target without
 		 * exporting arbitrary payload bytes. */
@@ -969,7 +976,8 @@ static void print_usage(void)
 {
 	extern const char *__progname;
 
-	fprintf(stderr, "Usage: %s [-d] [-h]\n", __progname);
+	fprintf(stderr, "Usage: %s -r <firmware-directory> [-c] [-n] [-d] [-h]\n", __progname);
+	fprintf(stderr, " -c	Opt in to the bounded RAM-only server check\n");
 	fprintf(stderr, " -d\tPrint detailed debug information\n");
 	fprintf(stderr, " -h\tPrint this usage info\n");
 }
@@ -995,8 +1003,11 @@ int main(int argc, char **argv)
 	int ret = 0;
 	int fd;
 
-	while ((opt = getopt(argc, argv, "dnhr:")) != -1) {
+	while ((opt = getopt(argc, argv, "cdnhr:")) != -1) {
 		switch (opt) {
+		case 'c':
+			ramcheck_enabled = true;
+			break;
 		case 'd':
 			tftp_debug = true;
 			break;

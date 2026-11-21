@@ -1,0 +1,53 @@
+{
+  "scope": "Opt-in RAM server check; offline and socket-intercepted native verification only; not installed or published on phone",
+  "tests": {
+    "host": {
+      "test_methods": 38,
+      "passed": true
+    },
+    "sanitizers": {
+      "test_methods": 38,
+      "passed": true
+    },
+    "arm64": {
+      "test_methods": 38,
+      "passed": true
+    }
+  },
+  "native_cases": 19,
+  "native_fixture_sha256": "bffdaa39ea696ad9c91fc0828c3cc8b2ce161b21ef6af2e993e040721e182a3f",
+  "arm64_daemon_sha256": "cc7addbe706f61ac5af3b72bbb0d4d45e362cbc076e9e5a8743abda59601facc",
+  "source_sha256": {
+    "source/ramcheck.h": "8f914c7974e5560ce828d0598935d7cfe8724faa09357e92e7eec8d148959b0e",
+    "source/tqftpserv.c": "2a59cf60299161683b6acc457e066d8c2b38915b90142247c04716e00bda1015",
+    "server_fixture.c": "1fe98fbe045902dc24f61136af0d5378c915273d436ffb74d42eac19d78e00ba",
+    "test_server.py": "59b5291f1c53ca353f73d46c38eeb64a0e7684d544ad6557f799e80d45f67763"
+  },
+  "firmware_input_sha256": {
+    "MODEM.MDT": "19f5741aef481cea4d7dd07c813dc3a983ef7efea34d41bd29beba169240a8a8",
+    "MODEM.B17": "bed0cf45000908a71cb5fbbf1a7d37b8020634450e026d60b781a151951907e4"
+  },
+  "source_findings": {
+    "check_filename_address": "0xc22b34c0",
+    "check_routine_address": "0xc09ed6ec",
+    "check_filename_argument_packet": "0xc09ed7d8",
+    "hello_literal_address": "0xc22b34dc"
+  },
+  "live_modem_start_attempts_this_step": 0,
+  "live_service_publications_this_step": 0,
+  "partition_writes_this_step": 0,
+  "closeout": {
+    "same_boot": true,
+    "modem": "ONLINE",
+    "crash_count": 0,
+    "original_registry_and_rmtfs_pids_unchanged": true,
+    "automatic_boot": 0,
+    "dump_gates": [
+      0,
+      0
+    ],
+    "native_staging_removed": true,
+    "wlfw_absent": true,
+    "phy_absent": true
+  }
+}
