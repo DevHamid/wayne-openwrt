@@ -64,6 +64,14 @@ the loader's early predicates, then compare those with a working Android
 reference. Do not invent an AP QMI request, power-cycle, change DIAG masks or
 flash a kernel on the strength of these static pointers.
 
+## Follow-up
+
+[ELOADER-PREDICATES.md](ELOADER-PREDICATES.md) follows the descriptor through
+its initialization table and dispatcher, identifies the loader's separate
+`kernel/elf_loader` query, and tests that query against the installed maps and
+offline mapper fixture. Runtime execution and the failing return remain
+unmeasured.
+
 ## Scope and verification
 
 This checkpoint was source-checked by the parent only. The requested independent

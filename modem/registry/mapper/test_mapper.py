@@ -100,7 +100,15 @@ class MapperTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='pdmapper-') as name:
             path = Path(name)
             shutil.copyfile(FIRMWARE / 'MODEMUW.JSN', path / 'MODEMUW.JSN')
-            for service, expected in [('wlan/fw', 1), ('unknown/service', 0)]:
+            cases = [('wlan/fw', 1, False), ('kernel/elf_loader', 1, False),
+                     ('unknown/service', 0, False), ('kernel/elf_loader', 0, True),
+                     ('wlan/fw', 1, True)]
+            for service, expected, omit_loader in cases:
+                data = json.loads((FIRMWARE / 'MODEMUW.JSN').read_text())
+                if omit_loader:
+                    data['sr_service'] = [entry for entry in data['sr_service']
+                                          if (entry['provider'], entry['service']) != ('kernel', 'elf_loader')]
+                (path / 'MODEMUW.JSN').write_text(json.dumps(data))
                 result = subprocess.run([*PREFIX, str(fixture), '--wire', name, service],
                                         capture_output=True, text=True, timeout=3)
                 self.assertEqual(result.returncode, 0, result.stderr)
