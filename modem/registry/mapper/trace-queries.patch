@@ -1,0 +1,105 @@
+--- a/pd-mapper.c
++++ b/pd-mapper.c
+@@ -41,6 +41,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <unistd.h>
++#include <time.h>
+ 
+ #include "assoc.h"
+ #include "json.h"
+@@ -53,6 +54,34 @@
+ };
+ 
+ static struct pd_map *pd_maps;
++static int trace_queries;
++static unsigned int trace_count;
++
++/* Fixed labels only: never export an arbitrary request or response body. */
++static void trace_query(const struct qrtr_packet *pkt, const char *label,
++                        unsigned int domains, unsigned int result,
++                        unsigned int error, const char *status)
++{
++	struct timespec now;
++	if (!trace_queries) return;
++	if (trace_count >= 64) {
++		if (trace_count == 64) {
++			fputs("mapper_trace limit=64 further_records=suppressed\n", stderr);
++			trace_count++;
++		}
++		return;
++	}
++	trace_count++;
++	if (clock_gettime(CLOCK_MONOTONIC, &now) < 0) {
++		fprintf(stderr, "mapper_trace seq=%u clock=error\n", trace_count);
++		return;
++	}
++	fprintf(stderr, "mapper_trace seq=%u mono_s=%lld mono_ns=%ld "
++	        "service=%s src_node=%u src_port=%u domains=%u "
++	        "result=%u error=%u send=%s\n", trace_count,
++	        (long long)now.tv_sec, now.tv_nsec, label, pkt->node, pkt->port,
++	        domains, result, error, status);
++}
+ 
+ static int valid_component(const char *value)
+ {
+@@ -74,7 +103,8 @@
+ 	struct servreg_loc_domain_list_entry *entry;
+ 	DEFINE_QRTR_PACKET(resp_buf, 256);
+ 	const struct pd_map *pd_map = pd_maps;
+-	unsigned int txn;
++	unsigned int txn = 0;
++	const char *trace_label = "malformed";
+ 	ssize_t len;
+ 	int ret;
+ 
+@@ -88,6 +118,9 @@
+ 	}
+ 
+ 	req.name[sizeof(req.name)-1] = '\0';
++	trace_label = !strcmp(req.name, "kernel/elf_loader") ? "kernel_elf_loader" :
++	              !strcmp(req.name, "wlan/fw") ? "wlan_fw" :
++	              !strcmp(req.name, "tms/servreg") ? "tms_servreg" : "other";
+ 
+ 	resp.result.result = QMI_RESULT_SUCCESS;
+ 	resp.db_revision_valid = 1;
+@@ -120,11 +153,16 @@
+ 		fprintf(stderr,
+ 			"[PD-MAPPER] failed to encode get_domain_list response: %s\n",
+ 			strerror(-len));
++		trace_query(pkt, trace_label, resp.domain_list_len,
++		            resp.result.result, resp.result.error, "encode_error");
+ 		return;
+ 	}
+ 
+ 	ret = qrtr_sendto(sock, pkt->node, pkt->port,
+ 			  resp_buf.data, resp_buf.data_len);
++	trace_query(pkt, trace_label, resp.domain_list_len,
++	            resp.result.result, resp.result.error,
++	            ret < 0 ? "error" : "ok");
+ 	if (ret < 0) {
+ 		fprintf(stderr,
+ 			"[PD-MAPPER] failed to send get_domain_list response: %s\n",
+@@ -467,18 +505,19 @@
+ 	int count = 0;
+ 	const struct pd_map *map;
+ 
+-	while ((option = getopt(argc, argv, "d:nh")) != -1) {
++	while ((option = getopt(argc, argv, "d:nth")) != -1) {
+ 		switch (option) {
+ 		case 'd': directory = optarg; break;
+ 		case 'n': check_only = 1; break;
++		case 't': trace_queries = 1; break;
+ 		case 'h':
+-			fprintf(stdout, "Usage: %s [-d map-directory] [-n]\n", argv[0]);
++			fprintf(stdout, "Usage: %s [-d map-directory] [-n] [-t]\n", argv[0]);
+ 			return 0;
+ 		default:
+ 			return 2;
+ 		}
+ 	}
+-	if (optind != argc || (check_only && !directory))
++	if (optind != argc || ((check_only || trace_queries) && !directory))
+ 		return 2;
+ 
+ 	ret = pd_load_maps(directory);

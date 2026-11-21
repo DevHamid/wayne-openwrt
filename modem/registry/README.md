@@ -46,6 +46,8 @@ Prepare the pinned upstream sources in ignored build directories:
 git clone https://github.com/linux-msm/pd-mapper.git modem/registry/mapper/source
 git -C modem/registry/mapper/source checkout --detach 5ecd2fe926aca7abfe40724177f63b942cff3947
 git -C modem/registry/mapper/source apply ../vendor-pil-mapdir.patch
+# Adds opt-in, capped fixed-label query tracing; default behavior stays quiet.
+git -C modem/registry/mapper/source apply ../trace-queries.patch
 git clone https://github.com/linux-msm/qrtr.git modem/registry/build/qrtr
 git -C modem/registry/build/qrtr checkout --detach 6d950d26e50d9ea3607510308fdd653bccc54400
 python3 modem/registry/mapper/build_userspace.py --qrtr-source modem/registry/build/qrtr
@@ -53,5 +55,11 @@ python3 modem/registry/mapper/test_mapper.py
 ```
 
 The mapper build also accepts `--cc`, `--static`, `--sanitize`, `--lzma-include`, and `--lzma-library`. The last two support an unpacked development package or a cross sysroot without installing anything on the build host. Follow the user's kernel-CI-only constraint separately: this helper builder does not build or change a kernel.
+
+The second patch adds **opt-in** `-t` fixed-label, capped query tracing;
+see [`MAPPER-TRACE.md`](../firmware-helper/MAPPER-TRACE.md) for the prepared
+instrument's evidence and limitations. It was tested with intercepted sockets
+on Wayne, not installed as a live replacement or added to startup. Do not
+replace the active locator merely to obtain an empty steady-state trace.
 
 The tests default to the socket-intercepting fixtures, not a live daemon. They exercise malformed/truncated responses, argument and map refusal, socket closure, no retry, and startup failure/cleanup with fake procd calls. `TRACE_TEST_SHELL` / `TRACE_TEST_APPLETS`, `LOCATOR_RUNNER` / `LOCATOR_FIXTURE`, and `PD_MAPPER_RUNNER` / `PD_MAPPER_TEST_BINARY` / `PD_MAPPER_FIXTURE` select explicit emulation wrappers and test binaries. These tests are not instructions to run an old radio window on the phone.

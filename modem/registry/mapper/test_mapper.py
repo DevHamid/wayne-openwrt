@@ -143,5 +143,48 @@ class MapperTests(unittest.TestCase):
                     self.assertNotIn(0x12, tlvs)
 
 
+    def test_opt_in_trace_labels_loader_request_without_echoing_names(self):
+        fixture = Path(os.environ.get('PD_MAPPER_FIXTURE', HERE / 'build/mapper-fixture'))
+        with tempfile.TemporaryDirectory(prefix='pdmapper-trace-') as name:
+            path = Path(name)
+            shutil.copyfile(FIRMWARE / 'MODEMUW.JSN', path / 'MODEMUW.JSN')
+            for query, label, count in [('kernel/elf_loader', 'kernel_elf_loader', 1),
+                                        ('wlan/fw', 'wlan_fw', 1),
+                                        ('PRIVATE_PAYLOAD_123', 'other', 0)]:
+                with self.subTest(query=query):
+                    p = subprocess.run([*PREFIX, str(fixture), '--wire-trace', name, query],
+                                       capture_output=True, text=True, timeout=3)
+                    self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+                    self.assertIn(f'service={label} src_node=0 src_port=777 domains={count} result=0 error=0 send=ok', p.stderr)
+                    self.assertRegex(p.stderr, r'^mapper_trace seq=1 mono_s=[0-9]+ mono_ns=[0-9]+ ')
+                    self.assertNotIn(query, p.stderr)
+                    self.assertNotIn('AddressSanitizer', p.stderr)
+                    self.assertNotIn('runtime error:', p.stderr)
+
+    def test_trace_distinguishes_decode_and_send_failure(self):
+        fixture = Path(os.environ.get('PD_MAPPER_FIXTURE', HERE / 'build/mapper-fixture'))
+        with tempfile.TemporaryDirectory(prefix='pdmapper-trace-') as name:
+            shutil.copyfile(FIRMWARE / 'MODEMUW.JSN', Path(name) / 'MODEMUW.JSN')
+            for mode, expected in [('--wire-trace-malformed', 'service=malformed src_node=0 src_port=777 domains=0 result=1 error=2 send=ok'),
+                                   ('--wire-trace-send-error', 'service=kernel_elf_loader src_node=0 src_port=777 domains=1 result=0 error=0 send=error')]:
+                p = subprocess.run([*PREFIX, str(fixture), mode, name, 'kernel/elf_loader'],
+                                   capture_output=True, text=True, timeout=3)
+                self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+                self.assertIn(expected, p.stderr)
+                self.assertNotIn('AddressSanitizer', p.stderr)
+                self.assertNotIn('runtime error:', p.stderr)
+
+    def test_trace_output_is_bounded(self):
+        fixture = Path(os.environ.get('PD_MAPPER_FIXTURE', HERE / 'build/mapper-fixture'))
+        with tempfile.TemporaryDirectory(prefix='pdmapper-trace-') as name:
+            shutil.copyfile(FIRMWARE / 'MODEMUW.JSN', Path(name) / 'MODEMUW.JSN')
+            p = subprocess.run([*PREFIX, str(fixture), '--wire-trace-limit', name, 'kernel/elf_loader'],
+                               capture_output=True, text=True, timeout=3)
+            self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+            lines = p.stderr.splitlines()
+            self.assertEqual(len(lines), 65)
+            self.assertEqual(sum(line.startswith('mapper_trace seq=') for line in lines), 64)
+            self.assertEqual(lines[-1], 'mapper_trace limit=64 further_records=suppressed')
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

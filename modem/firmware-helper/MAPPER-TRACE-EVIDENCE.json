@@ -1,0 +1,46 @@
+{
+  "scope": "prepared mapper observation; not installed or live startup capture",
+  "upstream_commit": "5ecd2fe926aca7abfe40724177f63b942cff3947",
+  "patch_order": [
+    "vendor-pil-mapdir.patch",
+    "trace-queries.patch"
+  ],
+  "clean_upstream_files_checked": [
+    "pd-mapper.c",
+    "json.c"
+  ],
+  "patch_reproduction_exact": true,
+  "host_mapper_test_methods": 11,
+  "sanitizer_mapper_test_methods": 11,
+  "sanitizer_leak_detection": false,
+  "host_query_test_methods": 7,
+  "host_startup_test_methods": 7,
+  "native_fixture": {
+    "quiet": "pass",
+    "loader": "pass",
+    "privacy": "pass",
+    "malformed": "pass",
+    "send_error": "pass",
+    "limit": "pass",
+    "sha256": {
+      "fixture": "62772f86647cd02dc0b65635ca8e6089b944b87876bb57649f59e5653c9c5652",
+      "MODEMUW.JSN": "e75d94b61df3e86c5b3f7a976d93f726cb85f2b897a8ea80a0924b9bb9c1a3bf"
+    },
+    "independent_closeout": "same boot; ONLINE/crash0; rmtfs unchanged; mapper PID/binary unchanged; gates0; fixture/staging absent"
+  },
+  "live_qmi_requests": 0,
+  "live_daemon_replacements": 0,
+  "source_sha256": {
+    "modem/registry/mapper/trace-queries.patch": "7e1d62b124c063f81f745cb417c1b86bacbc1192f56f0a43c83eca1ce86588a1",
+    "modem/registry/mapper/mapper_fixture.c": "8e6a4997da66034ce524bf26e146a117e93031145a3a4444a12b176d0dd7854c",
+    "modem/registry/mapper/test_mapper.py": "4f4393625f08443cfba8d7a70b3555807e9ad86413eb43e2808e3dece8a50414",
+    "modem/registry/mapper/source/pd-mapper.c": "969ea761e886e743b1e542d1b1ebfcd3769445b5423d0b53c6a8359bebb18c37"
+  },
+  "arm64_mapper_sha256": "15febf9659411710c6f36b57f9efce091f8bff35bdd689d6bf8f03931f200c87",
+  "limitations": [
+    "No real query/response trace collected",
+    "No persistent phone deployment or startup rollout",
+    "No WLAN fix or cellular data acceptance",
+    "No independent external review"
+  ]
+}
