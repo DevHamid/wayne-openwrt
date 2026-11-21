@@ -1,0 +1,228 @@
+{
+  "scope": "one approved native listener/restart trial; not a Wi-Fi fix or ROM release",
+  "live_attempts": [
+    [
+      "listener",
+      "1"
+    ],
+    [
+      "restart",
+      "2"
+    ]
+  ],
+  "successful_datagram_sends": [
+    [
+      "listener",
+      "31"
+    ],
+    [
+      "restart",
+      "27"
+    ]
+  ],
+  "response_frames": {
+    "listener": "02010020000e0002040000000000100400ffffff7f",
+    "restart": "0202002400070002040001000900"
+  },
+  "listener_state": {
+    "raw_hex": "0x7fffffff",
+    "name_from_vendor_header": "UNINIT"
+  },
+  "listener_result": 0,
+  "listener_error": 0,
+  "restart_result": 1,
+  "restart_error": 9,
+  "provider_verified_alive_before_restart": true,
+  "provider_publications": [
+    [
+      4096,
+      1,
+      0,
+      1,
+      18228
+    ],
+    [
+      4096,
+      2,
+      0,
+      1,
+      18229
+    ],
+    [
+      4096,
+      3,
+      0,
+      1,
+      18230
+    ],
+    [
+      4096,
+      4,
+      0,
+      1,
+      18231
+    ],
+    [
+      4096,
+      5,
+      0,
+      1,
+      18232
+    ],
+    [
+      4096,
+      6,
+      0,
+      1,
+      18233
+    ],
+    [
+      4096,
+      7,
+      0,
+      1,
+      18234
+    ],
+    [
+      4096,
+      8,
+      0,
+      1,
+      18235
+    ],
+    [
+      4096,
+      9,
+      0,
+      1,
+      18236
+    ],
+    [
+      4096,
+      10,
+      0,
+      1,
+      18237
+    ]
+  ],
+  "observation_samples": [
+    [
+      1,
+      0,
+      0
+    ],
+    [
+      2,
+      0,
+      0
+    ],
+    [
+      3,
+      0,
+      0
+    ],
+    [
+      4,
+      0,
+      0
+    ],
+    [
+      5,
+      0,
+      0
+    ],
+    [
+      6,
+      0,
+      0
+    ],
+    [
+      7,
+      0,
+      0
+    ],
+    [
+      8,
+      0,
+      0
+    ],
+    [
+      9,
+      0,
+      0
+    ],
+    [
+      10,
+      0,
+      0
+    ],
+    [
+      11,
+      0,
+      0
+    ],
+    [
+      12,
+      0,
+      0
+    ]
+  ],
+  "provider_counts": {
+    "tftp_read_opens": 0,
+    "tftp_denied_requests": 0,
+    "tftp_denied_writes": 0,
+    "tftp_denied_windows": 0,
+    "tftp_session_limits": 0,
+    "tftp_end_notifications": 0,
+    "tftp_socket_open_errors": 0,
+    "tftp_publish_errors": 0,
+    "tftp_select_errors": 0,
+    "tftp_decode_errors": 0,
+    "tftp_recv_errors": 0,
+    "tftp_last_recv_error": 0
+  },
+  "independent_cleanup": {
+    "same_boot": true,
+    "modem_state": "ONLINE",
+    "crash_count": 0,
+    "rmtfs_readonly_retained": true,
+    "allow_boot": 0,
+    "dump_gates": [
+      0,
+      0
+    ],
+    "provider_process_absent": true,
+    "service_4096_absent": true,
+    "staging_absent": true,
+    "observation_did_not_stop_modem": true
+  },
+  "tests": {
+    "host_packet_parser": 12,
+    "host_wrapped_transport": 10,
+    "sanitizer_wrapped_transport": 10,
+    "native_arm64_wrapped_transport": 10,
+    "collector_lifecycle_host": 15,
+    "fresh_target_launcher_fault_injection": false
+  },
+  "pdr_source_binary_sha256": {
+    "pdr_restart.c": "5f36715f25516ecca193f8987205ad8187619a58d27e041b2b7ba1590458a493",
+    "pdr_fixture.c": "4d38e2ef770ada638d293513246edda67ed40ff7bb6903395bfd71ae4328be5c",
+    "test_pdr.py": "a109a10b819d5f9ca5fdf4e6a027348296c71cc63e6b0a490845f0ebfc962359",
+    "test_pdr_listener.py": "c592b372bad4fd28c158fc64dc0ad6b8ac1e6094551deb445ce34e3c0edb1d5d",
+    "build_pdr.py": "57131bebac471aa0930b30e84dcaa9427fa1423a6a3b52f3097a5cb86112c904",
+    "build/arm64/pdr_restart": "c37d827da09783fa2896d2cee87bc42b9a2d0b91435e27862e612f231e3ee668",
+    "build/arm64/pdr-fixture": "a80e0b9b710b7deefc53091b04b70c37c2568cda5201a85c1d3fbf56161c1d2e"
+  },
+  "provider_binary_sha256": "6641354d5b3736e10fc71f385705f51ac8e1f12b5644358d610489c0f8144eb7",
+  "header_reference_commit": "2f7ff9f51ad6d37e067f32944467f0165eb2dfc9",
+  "header_sha256": {
+    "service-notifier.h": "ab4115e728f9aa3a04dded79111211dee7837f53e3b4a7fcd28a03ee695d332d",
+    "qmi.h": "3dcd7c195c6df70a971a2f220334fe6ac4fb47d8e13deceb76bcfbf86b0a8ca6"
+  },
+  "limitations": [
+    "Restart refusal cause not established",
+    "Listener current state applies to the queried domain name; not proof every WLAN service identifier is UNINIT",
+    "Firmware-side listener deletion not separately queried",
+    "No cellular bearer/IP/NAT/client internet or persistence validation"
+  ]
+}

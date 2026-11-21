@@ -20,6 +20,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <signal.h>
+#include <limits.h>
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -75,6 +77,7 @@ static int parse_response(const uint8_t *b, size_t len, uint8_t txn,
 {
 	size_t off, payload;
 	unsigned int msg_id;
+	int found = 0;
 
 	if (len < HDR_LEN + TLV_HDR_LEN + 4)
 		return -EINVAL;
@@ -86,7 +89,7 @@ static int parse_response(const uint8_t *b, size_t len, uint8_t txn,
 	if (msg_id != MSG_RESTART_PD)
 		return -EPROTO;
 	payload = (size_t)b[5] | ((size_t)b[6] << 8);
-	if (payload + HDR_LEN > len)
+	if (payload + HDR_LEN != len)
 		return -EPROTO;
 
 	for (off = HDR_LEN; off + TLV_HDR_LEN <= HDR_LEN + payload;) {
@@ -96,15 +99,17 @@ static int parse_response(const uint8_t *b, size_t len, uint8_t txn,
 		if (off + TLV_HDR_LEN + tlv_len > HDR_LEN + payload)
 			return -EPROTO;
 		if (type == TLV_RESULT) {
-			if (tlv_len < 4)
+			if (tlv_len != 4 || found)
 				return -EPROTO;
 			*result = b[off + 3] | (b[off + 4] << 8);
 			*error = b[off + 5] | (b[off + 6] << 8);
-			return 0;
+			found = 1;
 		}
 		off += TLV_HDR_LEN + tlv_len;
 	}
-	return -ENOENT;
+	if (off != len)
+		return -EPROTO;
+	return found ? 0 : -ENOENT;
 }
 
 static void print_hex(const uint8_t *b, size_t n)
@@ -187,6 +192,93 @@ static int do_send(unsigned int node, unsigned int port, const char *name)
 	return result == 0 ? 0 : 8;
 }
 
+static int build_listener(uint8_t *buf, size_t cap, const char *name)
+{
+	int n = build_request(buf, cap, 1, name);
+	if (n < 0 || (size_t)n + 4 > cap)
+		return -1;
+	memmove(buf + 11, buf + 7, (size_t)n - 7);
+	buf[3] = 0x20;
+	buf[5] += 4;
+	buf[7] = 1; buf[8] = 1; buf[9] = 0; buf[10] = 1;
+	buf[11] = 2;
+	return n + 4;
+}
+
+static int provider_alive(pid_t pid, const char *exe)
+{
+	char path[64], actual[PATH_MAX];
+	ssize_t n;
+	if (pid <= 1 || exe[0] != '/' || kill(pid, 0) < 0)
+		return 0;
+	snprintf(path, sizeof(path), "/proc/%ld/exe", (long)pid);
+	n = readlink(path, actual, sizeof(actual) - 1);
+	if (n < 0)
+		return 0;
+	actual[n] = 0;
+	return !strcmp(actual, exe);
+}
+
+/* No retry and no extra requests: close the listener on every exit path. */
+static int do_listen_restart(unsigned int node, unsigned int port,
+			     const char *name, pid_t pid, const char *exe)
+{
+	uint8_t req[128], response[256];
+	struct sockaddr_qrtr addr = {0};
+	struct timeval tv = { .tv_sec = 2 };
+	int fd = -1, rc = 3, len, result, error;
+	ssize_t n;
+	if (!provider_alive(pid, exe)) {
+		printf("provider_alive=no stage=before_listener\n");
+		return 9;
+	}
+	len = build_listener(req, sizeof(req), name);
+	if (len < 0)
+		return 2;
+	addr.sq_family = AF_QIPCRTR; addr.sq_node = node; addr.sq_port = port;
+	fd = socket(AF_QIPCRTR, SOCK_DGRAM, 0);
+	if (fd < 0)
+		return 3;
+	if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0 ||
+	    connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+		goto out;
+	for (int stage = 0; stage < 2; stage++) {
+		const char *label = stage ? "restart" : "listener";
+		if (stage) {
+			if (!provider_alive(pid, exe)) {
+				printf("provider_alive=no stage=before_restart\n");
+				rc = 9; goto out;
+			}
+			printf("provider_alive=yes stage=before_restart\n");
+			len = build_request(req, sizeof(req), 2, name);
+		}
+		printf("request_attempt=%s txn=%d\n", label, stage + 1);
+		if (send(fd, req, (size_t)len, 0) != len) { rc = 5; goto out; }
+		printf("request_sent=%s bytes=%d\n", label, len);
+		n = recv(fd, response, sizeof(response), 0);
+		if (n < 0) { printf("response=%s timeout_or_error=%d\n", label, errno); rc = 6; goto out; }
+		printf("response_frame=%s hex=", label);
+		print_hex(response, (size_t)n);
+		/* Reuse the strict restart decoder only after checking this stage's ids. */
+		if (n < HDR_LEN || response[1] != stage + 1 || response[2] ||
+		    response[3] != (stage ? 0x24 : 0x20) || response[4] ||
+		    (size_t)n != HDR_LEN + (size_t)response[5] + ((size_t)response[6] << 8)) {
+			printf("response=%s parse=rejected\n", label); rc = 7; goto out;
+		}
+		response[1] = 1; response[3] = 0x24;
+		if (parse_response(response, (size_t)n, 1, &result, &error) < 0) {
+			printf("response=%s parse=rejected\n", label); rc = 7; goto out;
+		}
+		printf("response=%s qmi_result=%d qmi_error=%d\n", label, result, error);
+		if (result || error) { rc = 8; goto out; }
+	}
+	rc = 0;
+out:
+	close(fd);
+	printf("listener_socket=closed\n");
+	return rc;
+}
+
 int main(int argc, char **argv)
 {
 	uint8_t buf[256];
@@ -211,6 +303,18 @@ int main(int argc, char **argv)
 		printf("parse=ok qmi_result=%d qmi_error=%d\n", result, error);
 		return 0;
 	}
+	if (argc == 7 && !strcmp(argv[1], "--listen-restart")) {
+		char *end;
+		unsigned long node, port, pid;
+		errno = 0; node = strtoul(argv[2], &end, 0);
+		if (errno || *end || !*argv[2] || argv[2][0] == '-' || node > UINT_MAX) return 2;
+		errno = 0; port = strtoul(argv[3], &end, 0);
+		if (errno || *end || !*argv[3] || argv[3][0] == '-' || port == 0 || port > UINT_MAX) return 2;
+		errno = 0; pid = strtoul(argv[5], &end, 10);
+		if (errno || *end || !*argv[5] || argv[5][0] == '-' || pid <= 1 || pid > INT_MAX) return 2;
+		return do_listen_restart((unsigned int)node, (unsigned int)port,
+					argv[4], (pid_t)pid, argv[6]);
+	}
 	if (argc == 5 && !strcmp(argv[1], "--send"))
 		return do_send((unsigned int)strtoul(argv[2], NULL, 0),
 			       (unsigned int)strtoul(argv[3], NULL, 0), argv[4]);
@@ -218,7 +322,8 @@ int main(int argc, char **argv)
 	fprintf(stderr,
 		"usage: %s --packet <pd-path>\n"
 		"       %s --parse <hex>\n"
-		"       %s --send <node> <port> <pd-path>\n",
-		argv[0], argv[0], argv[0]);
+		"       %s --send <node> <port> <pd-path>\n"
+		"       %s --listen-restart <node> <port> <pd-path> <provider-pid> <provider-exe>\n",
+		argv[0], argv[0], argv[0], argv[0]);
 	return 1;
 }

@@ -53,9 +53,10 @@ have had no server to answer it.
   (`service_notif_pd_restart()` iterates its connected `qmi_client_list`), which
   a raw one-shot client does not satisfy.
 
-## Next step
+## Follow-up
 
-Register a listener (`0x0020`) on the same socket, then issue the restart on
-that same connection, with the provider verified running immediately before the
-request. That is a further live-modem operation and needs its own bounded
-window.
+**Completed:** see [PDR-LISTENER.md](PDR-LISTENER.md). Registration succeeded,
+the provider was alive immediately before the same-socket restart, and restart
+still returned result 1/error 9. The earlier missing-registration explanation
+was a hypothesis and has now been falsified. The listener reported UNINIT;
+this recovery API is not established as a cold-start mechanism.

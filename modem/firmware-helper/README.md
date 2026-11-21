@@ -46,4 +46,20 @@ Protocol fixtures intercept networking. Lifecycle fixtures use synthetic state f
 
 Do not remove the refusal and run it on a phone. Any native trial needs a fresh reviewed baseline, owned tmpfs staging, an operation-specific budget, independent watchdogs, unchanged read-only backing/dump protections and independent closeout. No reboot, modem actuation, protected-storage change or electrical-control change is authorized by these files.
 
-Generated binaries and logs stay under ignored `build/`. No firmware images, private captures, subscriber/calibration data or live device configuration are included. This checkpoint is not wired into CI or normal image assembly.
+
+Generated binaries and logs stay under ignored `build/`. No firmware images,
+private captures, subscriber/calibration data or live device configuration are
+included. This checkpoint is not wired into CI or normal image assembly.
+
+## PDR listener/restart diagnostic
+
+`pdr_restart.c` also has an explicitly invoked `--listen-restart` mode. Build
+and test it with `python3 build_pdr.py --arm64-cc "$ARM64_CC"`. It is not called
+by any startup service or ROM assembler. The offline C fixture intercepts
+socket operations; running its success case does not restart real hardware.
+
+The approved native trial registered successfully, received **UNINIT** for the
+requested domain, then had its same-socket restart refused despite a live
+provider. See [PDR-LISTENER.md](PDR-LISTENER.md) and its sanitized evidence JSON.
+This falsifies the earlier registration-only explanation, not the overall
+pocket-modem design. Do not use a recovery request as an assumed cold-start API.

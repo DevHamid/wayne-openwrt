@@ -30,9 +30,10 @@ service, no dump-gate change, no SIM/provisioning operation.
 
 ## What this settles
 
-Early provider availability is **not** the blocker. With the provider publishing
-before the modem existed, the outcome is identical to every late-provider run:
-no firmware request, no WLFW, no PHY.
+Publishing this tested provider before modem power-up did not fix the blocker.
+The outcome matched the late-provider runs: no firmware request, no WLFW, no
+PHY. This does not prove that all provider protocol or firmware prerequisites
+match Android; only this publication-timing alternative was exercised.
 
 Two ordering facts were measured rather than assumed:
 
@@ -45,12 +46,12 @@ Two ordering facts were measured rather than assumed:
 
 ## Next lever
 
-ICNSS only acts in `icnss_driver_event_server_arrive`, which is driven by the
-WLFW (69) server appearing; that event carries the whole MSA/firmware handshake.
-`icnss_trigger_recovery()` is the exported path that issues
-`service_notif_pd_restart()` for the first instance — i.e. an explicit PD-restart
-request is what can start the modem-hosted WLAN PD. Without it the PD serves the
-notification endpoint but never publishes WLFW, so no firmware is requested.
-
-That request is a modem-state operation on a live subsystem and needs its own
-bounded, separately authorised trial with the provider running first.
+ICNSS's server-arrival event is driven by WLFW (69) publication and carries
+the MSA/firmware handshake. `icnss_trigger_recovery()` can issue
+`service_notif_pd_restart()`, but that is a recovery path, **not demonstrated
+as the cold-start mechanism for an uninitialized WLAN PD**. The earlier
+claim that this request could start the missing PD was a hypothesis, not a
+verified dependency. The follow-up [registered-listener trial](PDR-LISTENER.md)
+registered successfully and still received a refused restart, with the
+requested domain reporting UNINIT. Continue from Android startup/source
+comparison rather than repeating this request.
