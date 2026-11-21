@@ -25,8 +25,12 @@ service, no dump-gate change, no SIM/provisioning operation.
 - **Zero** provider requests, **zero** accepted firmware opens, **zero** denied
   requests.
 - WLFW service 69 never appeared; `/sys/class/ieee80211` stayed empty.
-- Full modem service table after power-up contains 66@"Service registry
-  notification service" at instance 180, node 0 — and no 69.
+- The filtered lookup for service 66 after power-up returned
+  "Service registry notification service" at instance 180, node 0, and a
+  service-69 lookup returned no row. **Correction (see
+  [SERVICE-TABLE.md](SERVICE-TABLE.md)):** this was a filtered observation, not
+  a full table. An unfiltered `qrtr-lookup` later showed 40 modem services and
+  26 AP services; only WLFW is missing, not the modem's QMI stack.
 
 ## What this settles
 

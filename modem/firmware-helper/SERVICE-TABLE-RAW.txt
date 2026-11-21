@@ -1,0 +1,67 @@
+  Service Version Instance Node  Port
+       26       1        0    0    81 Wireless data administrative service
+       47       1        0    0    68 Data Port Mapper service
+       33       1        0    0   311 IMS application service
+       17       1        0    0    42 Specific absorption rate service
+     4097 N/A        1    0    29 DIAG service (MODEM:CMD)
+       42       1        0    0   178 Data system determination service
+     4098       0        0    0    45 <unknown>
+     4097 N/A        3    0    32 DIAG service (MODEM:DCI_CMD)
+       29       1        0    0    87 Circuit switched videotelephony service
+       71       1        0    0    61 UIMHTTP service
+       36       1        0    0    35 Persistent device configuration service
+       21       1        0    0    22 Modem embedded file system service
+       22       1        0    0    25 Time service
+        4       1        0    0    80 Quality Of Service service
+       54       1        0    0    41 <unknown>
+       48       1        0    0   190 QMI DFS service
+        8       1        0    0    83 AT service
+       50       1        0    0    57 UIMRMT service
+       34       1        0    0    44 Coexistence service
+       18       1        0    0   342 IMS settings service
+        3       1        0    0    60 Network Access Service
+       41       1        1    0    47 RF radiated performance enhancement service
+       15       1        0    0    21 Test service
+        5       1        0    0    76 Wireless Messaging Service
+       12       1        0    0    63 Phonebook Management service
+       23       1        0    0    24 Thermal sensors service
+        2       1        0    0   186 Device Management Service
+       16       2        0    0   160 Location service (~ PDS v2)
+       11       1        0    0    66 User Identity Module service
+       66       1      180    0     1 Service registry notification service
+        7       1        0    0    82 Authentication service
+       55       1        2    0    56 QMI-SLIM service
+       74       1        0    0    43 <unknown>
+       68       1        0    0   192 <unknown>
+       43       2       18    0     4 Subsystem control service
+        9       2        0    0    59 Voice service
+       49       1        2    0    36 IPA control service
+       24       1        0    0    23 Thermal mitigation device service
+        1       1        0    0    78 Wireless Data Service
+       10       2        0    0    65 Card Application Toolkit service (v2)
+     4097 N/A      324    1 16426 DIAG service (WDSP:DCI)
+     4097 N/A      386    1 16429 DIAG service (<unk>:DATA)
+     4097 N/A      384    1 16416 DIAG service (<unk>:CNTL)
+     4097 N/A      192    1 16445 DIAG service (SENSORS:CNTL)
+     4097 N/A       66    1 16419 DIAG service (LPASS:DATA)
+       52       1        1    1 16435 Dynamic Heap Memory Sharing
+     4097 N/A      132    1 16422 DIAG service (WCNSS:DCI)
+     4097 N/A       64    1 16438 DIAG service (LPASS:CNTL)
+     4097 N/A      322    1 16425 DIAG service (WDSP:DATA)
+     4097 N/A      260    1 16428 DIAG service (CDSP:DCI)
+     1053       1        0    1 16431 <unknown>
+     4097 N/A        4    1 16418 DIAG service (MODEM:DCI)
+     4097 N/A      256    1 16447 DIAG service (CDSP:CNTL)
+     4097 N/A      130    1 16421 DIAG service (WCNSS:DATA)
+     4097 N/A      196    1 16424 DIAG service (SENSORS:DCI)
+       14       1        0    1    14 Remote file system service
+     4097 N/A        0    1 16440 DIAG service (MODEM:CNTL)
+     4097 N/A      258    1 16427 DIAG service (CDSP:DATA)
+     4097 N/A      388    1 16430 DIAG service (<unk>:DCI)
+     4097 N/A        2    1 16417 DIAG service (MODEM:DATA)
+     4097 N/A      320    1 16446 DIAG service (WDSP:CNTL)
+       49       1        1    1 16433 IPA control service
+     4097 N/A       68    1 16420 DIAG service (LPASS:DCI)
+       64       1        1    1 16449 Service registry locator service
+     4097 N/A      128    1 16436 DIAG service (WCNSS:CNTL)
+     4097 N/A      194    1 16423 DIAG service (SENSORS:DATA)
