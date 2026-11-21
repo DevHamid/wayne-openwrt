@@ -11,6 +11,7 @@ static size_t bulk_received;
 static unsigned last_block,large_allocations;
 static unsigned published,closed_sockets;
 static unsigned publication_keys[10],publication_ports[10],closed_seen[1024];
+static const char *rx_case;
 static int fail_publish,fail_socket,fail_select,high_socket,select_last,last_listener;
 extern void *__real_calloc(size_t,size_t);
 void *__wrap_calloc(size_t n,size_t size){if(size && n>1048576/size){large_allocations++;return NULL;}return __real_calloc(n,size);}
@@ -41,6 +42,14 @@ ssize_t __wrap_recvfrom(int fd,void *buf,size_t len,int flags,struct sockaddr *a
  struct sockaddr_qrtr q={.sq_family=AF_QIPCRTR,.sq_node=0,.sq_port=900};
  if(bulk_mode){unsigned char *p=buf;memcpy(addr,&q,sizeof(q));*alen=sizeof(q);p[0]=0;p[1]=OP_ACK;p[2]=last_block>>8;p[3]=last_block&255;return 4;}
  if(received++){errno=ENETRESET;return -1;}
+ if(rx_case && !strcmp(rx_case,"listen-rx-rrq")) {
+  memcpy(addr,&q,sizeof(q));*alen=sizeof(q);
+  ((unsigned char*)buf)[0]=0;((unsigned char*)buf)[1]=OP_RRQ;return 2;
+ }
+ if(rx_case && !strcmp(rx_case,"listen-rx-short")) {
+  memcpy(addr,&q,sizeof(q));*alen=sizeof(q);
+  ((unsigned char*)buf)[0]=0xff;return 1;
+ }
  memcpy(addr,&q,sizeof(q));*alen=sizeof(q);((unsigned char*)buf)[0]=0;((unsigned char*)buf)[1]=OP_ERROR;return 2;
 }
 static void cleanup_readers(void){struct tftp_client *p,*next;list_for_each_entry_safe(p,next,&readers,node)client_close_and_free(p);}
@@ -51,6 +60,7 @@ int main(int argc,char **argv){
  struct sockaddr_qrtr peer={.sq_family=AF_QIPCRTR,.sq_node=0,.sq_port=900};
  if(argc!=3)return 90;
  if(!strncmp(argv[2],"listen-",7)){
+  rx_case=argv[2];
   fail_publish=!strcmp(argv[2],"listen-publish-fail");fail_socket=!strcmp(argv[2],"listen-socket-fail");
   fail_select=!strcmp(argv[2],"listen-select-fail");high_socket=!strcmp(argv[2],"listen-high-fd");select_last=!strcmp(argv[2],"listen-last");
   char *args[]={"tqftpserv","-r",argv[1],NULL};int rc=upstream_main(3,args);

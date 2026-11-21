@@ -1097,6 +1097,9 @@ int main(int argc, char **argv)
 			}
 
 			/* Ignore control messages */
+			if (translate_readonly_enabled())
+				printf("readonly_listener_rx bytes=%zd profile=%u\n",
+				       len, FIRST_STOCK_PROFILE + i);
 			if (sq.sq_port == QRTR_PORT_CTRL) {
 				ret = qrtr_decode(&pkt, buf, len, &sq);
 				if (ret < 0) {
@@ -1125,6 +1128,12 @@ int main(int argc, char **argv)
 					continue;
 
 				opcode = (unsigned char)buf[0] << 8 | (unsigned char)buf[1];
+				if (translate_readonly_enabled())
+					printf("readonly_rx=%s profile=%u\n",
+					       opcode == OP_RRQ ? "rrq" :
+					       opcode == OP_WRQ ? "wrq" :
+					       opcode == OP_ERROR ? "error" : "other",
+					       FIRST_STOCK_PROFILE + i);
 				switch (opcode) {
 				case OP_RRQ:
 					handle_rrq(buf, len, &sq);

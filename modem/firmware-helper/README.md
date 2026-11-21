@@ -51,6 +51,15 @@ Generated binaries and logs stay under ignored `build/`. No firmware images,
 private captures, subscriber/calibration data or live device configuration are
 included. This checkpoint is not wired into CI or normal image assembly.
 
+## Receive-path counters
+
+In explicit `-r <dir>` read-only mode the daemon prints `readonly_listener_rx`
+for every datagram accepted on a published listener and `readonly_rx` for the
+opcode of each non-control packet, both before dispatch. This exists because an
+"accepted firmware opens" count alone cannot distinguish "no client asked" from
+"the listener never ran". Normal (non-`-r`) operation is unchanged and prints
+neither line. Live result and limits: [RX-OBSERVATION.md](RX-OBSERVATION.md).
+
 ## PDR listener/restart diagnostic
 
 `pdr_restart.c` also has an explicitly invoked `--listen-restart` mode. Build

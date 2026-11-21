@@ -42,6 +42,14 @@ class ServerPolicyTest(unittest.TestCase):
   r=self.invoke('listen-socket-fail');self.assertEqual(r.returncode,0,r.stdout+r.stderr)
  def test_select_error_closes_every_listener(self):
   r=self.invoke('listen-select-fail');self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+ def test_listener_records_rrq_before_filename_parse(self):
+  r=self.invoke('listen-rx-rrq');self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+  self.assertIn('readonly_rx=rrq profile=1',r.stdout)
+  self.assertNotIn('readonly_firmware_open=accepted',r.stderr)
+ def test_every_listener_datagram_is_logged_before_dispatch(self):
+  r=self.invoke('listen-rx-short');self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+  self.assertIn('readonly_listener_rx bytes=1 profile=1',r.stdout)
+  self.assertNotIn('readonly_rx=',r.stdout)
  def test_out_of_range_descriptor_is_rejected_before_fd_set(self):
   r=self.invoke('listen-high-fd');self.assertEqual(r.returncode,0,r.stdout+r.stderr)
 if __name__=='__main__':unittest.main(verbosity=2)

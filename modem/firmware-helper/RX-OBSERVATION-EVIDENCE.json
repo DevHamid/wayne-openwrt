@@ -1,0 +1,113 @@
+{
+  "scope": "one read-only provider observation on a live modem; no modem control, restart, flash or persistent install",
+  "evidence_version": 1,
+  "provider": {
+    "published_keys": 10,
+    "distinct_ports": true,
+    "validation": "readonly_validation=pass"
+  },
+  "observation_samples": [
+    {
+      "sample": 1,
+      "wlfw_rows": 0,
+      "phy_count": 0
+    },
+    {
+      "sample": 2,
+      "wlfw_rows": 0,
+      "phy_count": 0
+    },
+    {
+      "sample": 3,
+      "wlfw_rows": 0,
+      "phy_count": 0
+    },
+    {
+      "sample": 4,
+      "wlfw_rows": 0,
+      "phy_count": 0
+    },
+    {
+      "sample": 5,
+      "wlfw_rows": 0,
+      "phy_count": 0
+    },
+    {
+      "sample": 6,
+      "wlfw_rows": 0,
+      "phy_count": 0
+    },
+    {
+      "sample": 7,
+      "wlfw_rows": 0,
+      "phy_count": 0
+    },
+    {
+      "sample": 8,
+      "wlfw_rows": 0,
+      "phy_count": 0
+    },
+    {
+      "sample": 9,
+      "wlfw_rows": 0,
+      "phy_count": 0
+    },
+    {
+      "sample": 10,
+      "wlfw_rows": 0,
+      "phy_count": 0
+    },
+    {
+      "sample": 11,
+      "wlfw_rows": 0,
+      "phy_count": 0
+    },
+    {
+      "sample": 12,
+      "wlfw_rows": 0,
+      "phy_count": 0
+    }
+  ],
+  "receive_path": {
+    "listener_datagrams": 104,
+    "tftp_rx_rrq": 0,
+    "tftp_rx_wrq": 0,
+    "tftp_rx_error": 0,
+    "tftp_rx_other": 0,
+    "firmware_file_opens": 0,
+    "note": "Per-sample rx_packets in the launcher used the earlier opcode-only counter and stayed 0. This record uses the total-datagram counter instead.",
+    "interpretation": "The listener receive path executed and classified 104 datagrams; none carried a TFTP opcode. Counted datagrams are control traffic on QRTR_PORT_CTRL (lookups/bye), not firmware requests, so an unexercised listener is excluded as the reason zero RRQs were seen."
+  },
+  "wlfw_and_phy": "absent in all 12 samples at five-second intervals",
+  "cleanup": {
+    "same_boot": true,
+    "modem_state": "ONLINE",
+    "crash_count": 0,
+    "rmtfs_readonly_retained": true,
+    "allow_boot": 0,
+    "dump_gates": [
+      0,
+      0
+    ],
+    "provider_stopped": true,
+    "service_4096_absent": true,
+    "staging_absent": true,
+    "probe_cleanup": "complete"
+  },
+  "deployed_firmware": {
+    "files_checked": 30,
+    "all_match_saved_source": true
+  },
+  "provider_binary_sha256": "7eae0ad6c6887e1bc9d99d813ead4053bafced3dd94f3cefa47abcbe2d181b3f",
+  "tests": {
+    "host_suite": "27 tests pass",
+    "sanitizers": "27 tests pass",
+    "arm64_static_build": true
+  },
+  "limitations": [
+    "Window covers an already-ONLINE modem; it is not a cold-start test.",
+    "Zero TFTP opcodes does not establish why the WLAN PD is absent, only that this provider was not asked for firmware.",
+    "The preceding identically configured window raw log was replaced by this run; its summary showed the same zero-result without the total counter.",
+    "No cellular bearer/IP/NAT/client-internet or persistence validation."
+  ]
+}
