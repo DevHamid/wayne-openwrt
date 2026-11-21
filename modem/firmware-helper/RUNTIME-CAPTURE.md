@@ -77,9 +77,15 @@ IPA driver**, not a modem firmware fault, and it explains the repeated
 unexplained reboots observed during this work. It fires after the modem has
 progressed far enough to register an IPA client service.
 
-Consequence: any window that lets the modem run past ~3 minutes currently
-takes the whole AP down. That is a separate defect from the missing WLAN PD
-and must be fixed before longer observation is meaningful.
+This capture proves an AP panic after a failed IPA transaction in this
+particular window; it does **not** establish that every modem start fails
+after three minutes. A subsequent audit of the saved capture script found
+that its EXIT cleanup killed the traced mapper and restarted `wayne-qrtr`
+after observation while the modem remained ONLINE. The output confirms that
+cleanup executed and that the managed mapper was then absent. Registry
+reannouncement is therefore a confound for the later second IPA request,
+not a proven spontaneous modem lifetime limit. Do not repeat that cleanup
+sequence in the next observation window.
 
 ### Source-verified cause of the assert
 
@@ -144,10 +150,14 @@ Mitigation used from then on: write to a temporary name, `sync`, atomic `mv`,
 
 ## Confirmed vs unresolved
 
-**Confirmed:** the loader queries `kernel/elf_loader` and is answered; the
-modem then issues a WRQ that our read-only provider denies; the AP kernel
-BUGs in `ipa_q6_clnt_svc_arrive` about 3 minutes after a cold start and
-reboots.
+**Confirmed in that captured sequence:** the loader queries `kernel/elf_loader`
+and is answered; the modem then issues a WRQ that our read-only provider denies;
+the AP kernel later BUGs in `ipa_q6_clnt_svc_arrive` after a second INIT_DRIVER
+request times out. Observer cleanup restarted the nameserver before that failure,
+so this is not proof of an inevitable cold-start lifetime limit. A subsequent
+boot-only containment candidate and one-start trial ran for 302.95 sampled
+seconds with no service restarts, no second request and no panic; see
+[IPA-BOOT-TRIAL.md](IPA-BOOT-TRIAL.md). No timeout occurred in that later trial.
 
 **Not established:** which file the WRQ targets, whether denying it blocks PD
 startup, why `ipa_q6_clnt_svc_arrive` asserts, and whether the missing WLFW
