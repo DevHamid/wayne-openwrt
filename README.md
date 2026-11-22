@@ -4,6 +4,23 @@
 
 **Vision / definition of done:** phone = pocket modem + services box, finished entirely on vendor kernel 4.19 + OpenWrt 21.02. **The finish line = a flashable OpenWrt ROM installable from TWRP/OrangeFox (recovery zip) — no PC, no fastboot.** Mainline kernel + OpenWrt 25/newest are a *future* track after v1.0 (mainline still buggy: partial modem, broken power management — moving now would break more than it fixes).
 
+## Current status (2026-11-22)
+
+- **2026-11-22 — the ~42 s modem ERR_FATAL loop is root-caused and fixed (verified on device, reboot-persistent).**
+  The loop was service starvation, not kernel/firmware breakage: this 4.19 CAF qrtr has no in-kernel
+  nameserver and forwards control packets to remote nodes only, so a freshly booted modem incarnation
+  learns the AP-side services it needs (rmtfs 14, servreg/pd-mapper 64, tqftp 4096) solely from
+  NEW_SERVER announcements that arrive AFTER its boot. Daemons that announce once at their own start
+  starve every later modem boot -> EFS/servreg/`server_check.txt` never answer -> ERR_FATAL every
+  ~41.8 s (117 crashes in one night). The build now ships the radio stack (`modem/radio-bin`:
+  pd-mapper, qrtr-ns, tqftpserv, locator-query, qrtr-lookup + `modem/pd-maps/MODEMR.JSN`/`MODEMUW.JSN`)
+  and `wayne-qrefresh`, which re-announces every service on each modem ONLINE transition.
+  Device-verified across a reboot: services auto-start, modem booted via the sysfs `boot` attribute,
+  qrefresh re-announced on ONLINE, and the modem ran 300+ s with **0 fatals** (was 41.8 s cadence),
+  actively using rmtfs and writing `server_check.txt` through tqftp. Diagnostics that pinned it down:
+  an SMEM reason scan at fatal time (no reason string exists on this firmware), a full modem ramdump
+  (all zeros — the firmware scrubs its memory), and a QRTR probe daemon proving local services never
+  receive lookups on this kernel.
 ## Current status (2026-11-19)
 
 The work is now **structure-first**. We are not treating the full-initramfs image as the product; it remains a RAM/test vehicle. The product path is:
