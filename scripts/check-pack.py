@@ -16,8 +16,12 @@ def _cmdline(mkboot, img):
 
 packer = pathlib.Path(__file__).with_name("pack-boot.py")
 assert packer.is_file(), "Missing safe argument-list packer"
-assert len(sys.argv) == 5, "Usage: check-pack.py MKBOOT_DIR DONOR KERNEL RAMDISK"
-mkboot, donor, kernel, ramdisk = map(lambda s: pathlib.Path(s).resolve(), sys.argv[1:])
+assert len(sys.argv) in (5, 6), "Usage: check-pack.py MKBOOT_DIR DONOR KERNEL RAMDISK [MAX_MIB]"
+mkboot, donor, kernel, ramdisk = (pathlib.Path(s).resolve() for s in sys.argv[1:5])
+# Some images intentionally carry a whole rootfs (the 24.10 RAM diagnostic
+# image ships the full userspace + radio stack), so the ceiling is per-call.
+# Images destined for the 32 MiB boot partition keep the default strict cap.
+max_mib = int(sys.argv[6]) if len(sys.argv) == 6 else 64
 with tempfile.TemporaryDirectory(dir=donor.parent, prefix="pack-check-") as tmp:
     tmp = pathlib.Path(tmp)
     output = tmp / "test.img"
@@ -29,7 +33,7 @@ with tempfile.TemporaryDirectory(dir=donor.parent, prefix="pack-check-") as tmp:
                    check=True, stdout=subprocess.DEVNULL)
     for name, source in (("kernel", kernel), ("ramdisk", ramdisk)):
         assert (tmp / "verify" / name).read_bytes() == source.read_bytes(), name + " mismatch"
-    assert output.stat().st_size < 64 * 1024 * 1024, "Exceeds assumed 64 MiB boot ceiling"
+    assert output.stat().st_size < max_mib * 1024 * 1024, "Exceeds %d MiB boot ceiling" % max_mib
     # THE guard that matters: no root=/dm= may reach the kernel. An appended
     # root= is what made the v0.9 installer reboot the phone.
     want, got = _cmdline(mkboot, donor), _cmdline(mkboot, output)
