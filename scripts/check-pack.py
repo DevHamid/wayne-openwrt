@@ -21,7 +21,7 @@ mkboot, donor, kernel, ramdisk = (pathlib.Path(s).resolve() for s in sys.argv[1:
 # Some images intentionally carry a whole rootfs (the 24.10 RAM diagnostic
 # image ships the full userspace + radio stack), so the ceiling is per-call.
 # Images destined for the 32 MiB boot partition keep the default strict cap.
-max_mib = int(sys.argv[6]) if len(sys.argv) == 6 else 64
+max_mib = int(sys.argv[5]) if len(sys.argv) == 6 else 64
 with tempfile.TemporaryDirectory(dir=donor.parent, prefix="pack-check-") as tmp:
     tmp = pathlib.Path(tmp)
     output = tmp / "test.img"
