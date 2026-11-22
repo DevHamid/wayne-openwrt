@@ -196,8 +196,12 @@ jobs:
           cp ../../overlay-openwrt/etc/init.d/pd-mapper etc/init.d/pd-mapper
           cp ../../overlay-openwrt/etc/init.d/tqftpserv etc/init.d/tqftpserv
           cp ../../overlay-openwrt/etc/init.d/qrtr-ns etc/init.d/qrtr-ns
-          chmod +x etc/init.d/pd-mapper etc/init.d/tqftpserv etc/init.d/qrtr-ns
+          cp ../../overlay-openwrt/etc/init.d/wayne-wlan-fw etc/init.d/wayne-wlan-fw
+          mkdir -p etc/config
+          cp ../../overlay-openwrt/etc/config/wayne-modem etc/config/wayne-modem
+          chmod +x etc/init.d/pd-mapper etc/init.d/tqftpserv etc/init.d/qrtr-ns etc/init.d/wayne-wlan-fw
           ln -sf ../init.d/qrtr-ns etc/rc.d/S11qrtr-ns
+          ln -sf ../init.d/wayne-wlan-fw etc/rc.d/S95wayne-wlan-fw
           ln -sf ../init.d/pd-mapper etc/rc.d/S96pd-mapper
           ln -sf ../init.d/tqftpserv etc/rc.d/S96tqftpserv
           (find . -print0 | cpio --null -o --format=newc 2>/dev/null | gzip -9 > ../openwrt-initramfs.cpio.gz)

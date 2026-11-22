@@ -1,0 +1,33 @@
+#!/bin/sh
+# Materialize the WLAN firmware where tqftpserv serves it from.
+# The boot partition cannot carry the firmware (~24 MiB), so it is
+# taken from the device's own vendor/firmware partition at boot.
+START=95
+STOP=10
+
+boot_wlan_fw() {
+	local src=/mnt/mmcblk0p56
+	local dst=/readonly/firmware/image
+
+	if [ ! -d "$src/image" ]; then
+		mkdir -p "$src"
+		mount -o ro /dev/mmcblk0p56 "$src" 2>/dev/null
+	fi
+	[ -d "$src/image" ] || return 1
+
+	mkdir -p "$dst" /readonly/vendor/firmware
+	for f in "$src"/image/wlanmdsp.mbn "$src"/image/bdwlan.*; do
+		[ -e "$f" ] || continue
+		b=$(basename "$f")
+		cp "$f" "$dst/$b"
+		cp "$f" "/readonly/vendor/firmware/$b"
+	done
+	# modem carrier-config tree (served on request)
+	[ -d "$src/image/modem_pr" ] && cp -r "$src/image/modem_pr" "$dst/" 2>/dev/null
+	return 0
+}
+
+start_service() {
+	boot_wlan_fw
+	logger -t wayne-wlan-fw "wlan firmware staged: $(ls /readonly/firmware/image 2>/dev/null | wc -l) files"
+}
