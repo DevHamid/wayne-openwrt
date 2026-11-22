@@ -996,18 +996,15 @@ jobs:
             --exclude=./proc --exclude=./sys --exclude=./dev --exclude=./tmp \
             --exclude=./mnt --exclude=./init --exclude=./rom --exclude=./usb-gadget.sh \
             -C build/openwrt .
-          tar -tzf build/rom/system/rootfs.tar.gz | grep -q '^./sbin/init$' \
-            || { echo "::error::24.10 rootfs.tar.gz missing ./sbin/init"; exit 1; }
-          tar -tzf build/rom/system/rootfs.tar.gz | grep -Fxq './usr/lib/wayne/usb-gadget.sh' \
-            || { echo "::error::24.10 ROM tar missing persistent USB gadget helper"; exit 1; }
-          tar -tzf build/rom/system/rootfs.tar.gz | grep -Fxq './usr/lib/wayne/wlan-load.sh' \
-            || { echo "::error::24.10 ROM tar missing WLAN module loader"; exit 1; }
-          tar -tzf build/rom/system/rootfs.tar.gz | grep -Fxq './etc/rc.d/S99wayne-wlan' \
-            || { echo "::error::24.10 ROM tar missing WLAN loader service"; exit 1; }
-          tar -tzf build/rom/system/rootfs.tar.gz | grep -Fxq './usr/lib/wayne/radio/pd-mapper' \
-            || { echo "::error::24.10 ROM tar missing radio stack"; exit 1; }
-          tar -tzf build/rom/system/rootfs.tar.gz | grep -Fxq './lib/firmware/modem.mdt' \
-            || { echo "::error::24.10 ROM tar missing modem firmware"; exit 1; }
+          # Capture the listing once.  `grep -q` inside a pipefail pipeline
+          # exits early, which makes tar die on SIGPIPE and the gate report a
+          # false "missing file".
+          ROM_LIST=$(tar -tzf build/rom/system/rootfs.tar.gz)
+          for want in ./sbin/init ./usr/lib/wayne/usb-gadget.sh ./usr/lib/wayne/wlan-load.sh \
+                      ./etc/rc.d/S99wayne-wlan ./usr/lib/wayne/radio/pd-mapper ./lib/firmware/modem.mdt; do
+            grep -Fxq "$want" <<< "$ROM_LIST" \
+              || { echo "::error::24.10 ROM tar missing $want"; exit 1; }
+          done
           cp recovery/update-binary  build/rom/META-INF/com/google/android/update-binary
           cp recovery/updater-script build/rom/META-INF/com/google/android/updater-script
           (cd build/rom && zip -qr ../wayne-openwrt-2410-rom.zip .)
