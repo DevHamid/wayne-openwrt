@@ -32,8 +32,26 @@
   **The registry lives only on `debug/wayne-wlan-sfr-v2`; the default `adios-wayne` kernel lacks it, so
   a plain push build (run #164) would regress the modem fix.** `build.yml` now records
   `qrtr_registry=present|absent` in `build/kernel-source.txt`, warns on `absent`, and the `release` job
-  refuses to publish a ROM that lacks it. *Still open:* Wi-Fi PHY (ICNSS firmware-ready) and native
-  cellular data — both need a device window.
+  refuses to publish a ROM that lacks it.
+- **2026-11-22 — Wi-Fi root cause found (source-verified) and the missing step fixed.** Wi-Fi has no
+  channel of its own: `wlan_pd` is a **subdomain of the modem**, so the WCN3990 rides the same QRTR/QMI
+  transport. `icnss` is built-in and pends `FW is not ready yet` until the **WLFW service (id 69)**
+  arrives on the QRTR bus — `drivers/soc/qcom/icnss_qmi.c` does
+  `qmi_add_lookup(&priv->qmi, WLFW_SERVICE_ID_V01, ...)` and has an `icnss_wlfw_server_arrive`
+  handler; arrival sets `ICNSS_FW_READY` and calls `icnss_call_driver_probe`. That arrival is delivered
+  by the **same in-kernel QRTR service registry** the modem fix needs, so a pre-registry kernel
+  dead-ends the WLAN bring-up silently (no PHY, no error). Second gap: `debug/wayne-wlan-sfr-v2` builds
+  qcacld as a **module** (`CONFIG_QCA_CLD_WLAN=m`, commit `6f446442d "wayne: build qcacld as a module"`,
+  plus the `qdf` initcall fixes a modular qcacld needs) precisely so it can load *after* the modem is
+  up — a built-in wlan driver would have run its one-shot probe at kernel init and could never be
+  re-probed. But nothing in the rootfs loaded `wlan.ko`.
+  **Fix:** new `init.d/wayne-wlan` (START=99, after `modem-boot-trigger`@97) + `usr/lib/wayne/wlan-load.sh`
+  wait for the modem PD and `ICNSS_FW_READY`, then `modprobe wlan` (retry on `-EPROBE_DEFER`, log to
+  `/root/wlan-load.log`). `root/wifi-diag.sh` now prints the whole chain top-down
+  (A modem/QRTR → B service registry → C icnss FW-ready → D `wlan.ko` → E wiphy → F hostapd) so the
+  first broken layer is unambiguous. The in-tree module is `wlan.ko` (`MODNAME := wlan`,
+  `obj-$(CONFIG_QCA_CLD_WLAN) += wlan.o` in `drivers/staging/qcacld-3.0/Kbuild`). *Still open:* boot
+  the registry ROM (run #168) on device to confirm PHY + AP, then native cellular data — a device window.
 ## Current status (2026-11-19)
 
 The work is now **structure-first**. We are not treating the full-initramfs image as the product; it remains a RAM/test vehicle. The product path is:
