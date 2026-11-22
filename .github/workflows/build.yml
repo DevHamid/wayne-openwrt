@@ -979,7 +979,7 @@ jobs:
           python3 scripts/check-pack.py mkboot donor-boot.img \
             "$KERNEL" build/openwrt-2410-initramfs.cpio.gz 256
           ls -lh build/openwrt-2410-boot.img
-          python3 scripts/check-2410.py build/openwrt-2410-boot.img "$KERNEL" | tee build/VERIFICATION.json
+          python3 scripts/check-2410.py build/openwrt-2410-boot.img "$KERNEL" --max-mib 256 | tee build/VERIFICATION.json
 
       - name: Assemble flashable 24.10 ROM zip (rootfs -> system partition)
         run: |

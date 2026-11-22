@@ -14,10 +14,14 @@ assembly = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(assembly)
 
 
-def check(image_path, source_kernel, expected_ujail=None):
+def check(image_path, source_kernel, expected_ujail=None, max_mib=32):
     kernel, ramdisk = assembly.boot_parts(image_path.read_bytes())
     assert kernel == source_kernel.read_bytes(), 'Kernel payload changed'
-    assert image_path.stat().st_size < 32 * 1024 * 1024, 'Debug boot image exceeds conservative 32 MiB limit'
+    # The 24.10 RAM diagnostic image intentionally carries the whole rootfs
+    # (incl. the radio stack and modem firmware), so the ceiling is a
+    # parameter.  Images written to the 32 MiB boot partition keep the
+    # conservative default.
+    assert image_path.stat().st_size < max_mib * 1024 * 1024, f'Boot image exceeds {max_mib} MiB limit'
     files = {name: (mode, data) for name, mode, data in assembly.newc(gzip.decompress(ramdisk))}
     required = [
         'init', 'sbin/init', 'sbin/procd', 'usr/libexec/login.sh', 'bin/busybox-static',
@@ -88,5 +92,6 @@ if __name__ == '__main__':
     parser.add_argument('image', type=Path)
     parser.add_argument('kernel', type=Path)
     parser.add_argument('--expected-ujail', type=Path)
+    parser.add_argument('--max-mib', type=int, default=32)
     args = parser.parse_args()
-    check(args.image, args.kernel, args.expected_ujail)
+    check(args.image, args.kernel, args.expected_ujail, args.max_mib)
