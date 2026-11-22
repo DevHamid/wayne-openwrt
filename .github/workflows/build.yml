@@ -981,6 +981,38 @@ jobs:
           ls -lh build/openwrt-2410-boot.img
           python3 scripts/check-2410.py build/openwrt-2410-boot.img "$KERNEL" | tee build/VERIFICATION.json
 
+      - name: Assemble flashable 24.10 ROM zip (rootfs -> system partition)
+        run: |
+          set -euo pipefail
+          # Production 24.10 ROM: same split-ROM shape as the 21.02 ROM --
+          # boot = kernel + tiny system bootstrap, system = the 24.10 rootfs.
+          # rom-boot.img is reused from the main artifact so the bootstrap
+          # stays the on-device-proven one.
+          test -f main-artifact/build/rom-boot.img \
+            || { echo "::error::rom-boot.img missing from main artifact"; exit 1; }
+          mkdir -p build/rom/boot build/rom/system build/rom/META-INF/com/google/android
+          cp main-artifact/build/rom-boot.img build/rom/boot/boot.img
+          tar -czf build/rom/system/rootfs.tar.gz \
+            --exclude=./proc --exclude=./sys --exclude=./dev --exclude=./tmp \
+            --exclude=./mnt --exclude=./init --exclude=./rom --exclude=./usb-gadget.sh \
+            -C build/openwrt .
+          tar -tzf build/rom/system/rootfs.tar.gz | grep -q '^./sbin/init$' \
+            || { echo "::error::24.10 rootfs.tar.gz missing ./sbin/init"; exit 1; }
+          tar -tzf build/rom/system/rootfs.tar.gz | grep -Fxq './usr/lib/wayne/usb-gadget.sh' \
+            || { echo "::error::24.10 ROM tar missing persistent USB gadget helper"; exit 1; }
+          tar -tzf build/rom/system/rootfs.tar.gz | grep -Fxq './usr/lib/wayne/wlan-load.sh' \
+            || { echo "::error::24.10 ROM tar missing WLAN module loader"; exit 1; }
+          tar -tzf build/rom/system/rootfs.tar.gz | grep -Fxq './etc/rc.d/S99wayne-wlan' \
+            || { echo "::error::24.10 ROM tar missing WLAN loader service"; exit 1; }
+          tar -tzf build/rom/system/rootfs.tar.gz | grep -Fxq './usr/lib/wayne/radio/pd-mapper' \
+            || { echo "::error::24.10 ROM tar missing radio stack"; exit 1; }
+          tar -tzf build/rom/system/rootfs.tar.gz | grep -Fxq './lib/firmware/modem.mdt' \
+            || { echo "::error::24.10 ROM tar missing modem firmware"; exit 1; }
+          cp recovery/update-binary  build/rom/META-INF/com/google/android/update-binary
+          cp recovery/updater-script build/rom/META-INF/com/google/android/updater-script
+          (cd build/rom && zip -qr ../wayne-openwrt-2410-rom.zip .)
+          ls -lh build/wayne-openwrt-2410-rom.zip
+
       - name: Upload ImmortalWrt 24.10.4 test image
         uses: actions/upload-artifact@v4
         with:
@@ -988,6 +1020,7 @@ jobs:
           path: |
             build/openwrt-2410-boot.img
             build/openwrt-2410-initramfs.cpio.gz
+            build/wayne-openwrt-2410-rom.zip
 
   # ---- Tag-triggered Release (NO rebuild) ----------------------------------
   # Push a tag like `git tag v0.9.5 && git push origin v0.9.5`. This job does

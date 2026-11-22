@@ -214,14 +214,46 @@ def main():
         ('modem/rmtfs', 'etc/init.d/rmtfs'),
         ('scripts/modem-boot-trigger.init', 'etc/init.d/modem-boot-trigger'),
         ('overlay-openwrt/etc/uci-defaults/90-usb0-lan', 'etc/uci-defaults/90-usb0-lan'),
+        # Radio stack: the modem cannot come up (or stay up) without these
+        # user-space services, and the WLAN loader depends on them too.
+        ('modem/radio-bin/pd-mapper', 'usr/lib/wayne/radio/pd-mapper'),
+        ('modem/radio-bin/qrtr-ns', 'usr/lib/wayne/radio/qrtr-ns'),
+        ('modem/radio-bin/locator-query', 'usr/lib/wayne/radio/locator-query'),
+        ('modem/radio-bin/qrtr-lookup', 'usr/lib/wayne/radio/qrtr-lookup'),
+        ('modem/radio-bin/tqftpserv', 'usr/bin/tqftpserv'),
+        ('overlay-openwrt/etc/init.d/pd-mapper', 'etc/init.d/pd-mapper'),
+        ('overlay-openwrt/etc/init.d/tqftpserv', 'etc/init.d/tqftpserv'),
+        ('overlay-openwrt/etc/init.d/qrtr-ns', 'etc/init.d/qrtr-ns'),
+        ('overlay-openwrt/etc/init.d/wayne-wlan-fw', 'etc/init.d/wayne-wlan-fw'),
+        ('overlay-openwrt/etc/init.d/wayne-wlan', 'etc/init.d/wayne-wlan'),
+        ('overlay-openwrt/usr/lib/wayne/wlan-load.sh', 'usr/lib/wayne/wlan-load.sh'),
+        ('scripts/wifi-diag.sh', 'root/wifi-diag.sh'),
     ]:
         copy(repo, root, source, target)
     (root / 'bin/busybox-static').chmod(0o755)
-    for name, order in [('usb-gadget', 95), ('rmtfs', 95), ('modem-boot-trigger', 97), ('burnin-guard', 99)]:
+    # PD maps + modem firmware: PIL probes these by name from /lib/firmware.
+    for m in ('MODEMR.JSN', 'MODEMUW.JSN'):
+        copy(repo, root, 'modem/pd-maps/' + m, 'usr/share/wayne/pd-maps/' + m)
+    fw = root / 'lib/firmware'
+    fw.mkdir(parents=True, exist_ok=True)
+    for src in sorted((repo / 'modem-firmware').iterdir()):
+        if src.is_file():
+            shutil.copyfile(src, fw / src.name)
+    # PIL probes lowercase names on a case-sensitive rootfs; add lowercase
+    # copies of the modem boot chain exactly like the 21.02 ROM does.
+    for up in ('MBA.MBN', 'MODEM.MDT'):
+        if (fw / up).is_file():
+            shutil.copyfile(fw / up, fw / up.lower())
+    for name, order in [('qrtr-ns', 11), ('usb-gadget', 95), ('rmtfs', 95),
+                        ('wayne-wlan-fw', 95), ('pd-mapper', 96), ('tqftpserv', 96),
+                        ('modem-boot-trigger', 97), ('wayne-wlan', 99),
+                        ('burnin-guard', 99)]:
         link = root / f'etc/rc.d/S{order}{name}'
         link.unlink(missing_ok=True)
         link.symlink_to('../init.d/' + name)
-    (root / 'etc/config/wayne-modem').write_text("config modem 'main'\n\toption allow_boot '0'\n")
+    # The IPA use-after-free that reboot-looped the device is fixed in this
+    # kernel (f997eb3), so the modem may auto-boot on the main ROM again.
+    (root / 'etc/config/wayne-modem').write_text("config modem 'main'\n\toption allow_boot '1'\n")
     # A RAM-debug image must not automount internal Android filesystems rw.
     # The modem service alone mounts its firmware volume ro when needed.
     (root / 'etc/uci-defaults/11-anonmount').unlink(missing_ok=True)
@@ -238,7 +270,7 @@ def main():
         'source_run': args.source_run, 'kernel_banner': banner,
         'kernel_sha256': digest(kernel), 'modem_module_sha256': digest(ko.read_bytes()),
         'repository_commit': subprocess.check_output(['git', '-C', str(repo), 'rev-parse', 'HEAD'], text=True).strip(),
-        'packages_added': packages, 'modem_powerup_default': 'disabled: unresolved ERR_FATAL restart loop',
+        'packages_added': packages,        'modem_powerup_default': 'enabled: IPA QMI use-after-free fixed (kernel f997eb3)',
         'limits': ['Hardware boot/radio/screen-off still require device verification', 'No EFS/calibration writes permitted'],
     }
     (root / 'etc/wayne-build.json').write_text(json.dumps(provenance, indent=2) + '\n')

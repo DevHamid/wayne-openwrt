@@ -27,6 +27,15 @@ def check(image_path, source_kernel, expected_ujail=None):
         'sbin/wifi', 'lib/wifi/mac80211.uc', 'usr/share/hostap/wifi-detect.uc', 'etc/wayne-build.json',
         'lib/firmware/wlan/qca_cld/wlanmdsp.mbn',
         'lib/firmware/wlan/qca_cld/bdwlan30.bin',
+        # Radio stack + WLAN loader: required for modem bring-up and to keep
+        # the modem up without tripping the IPA QMI use-after-free.
+        'usr/lib/wayne/radio/pd-mapper', 'usr/lib/wayne/radio/qrtr-ns',
+        'usr/lib/wayne/radio/locator-query', 'usr/lib/wayne/radio/qrtr-lookup',
+        'usr/bin/tqftpserv', 'usr/share/wayne/pd-maps/MODEMR.JSN',
+        'usr/share/wayne/pd-maps/MODEMUW.JSN', 'lib/firmware/modem.mdt',
+        'lib/firmware/mba.mbn', 'etc/init.d/pd-mapper', 'etc/init.d/tqftpserv',
+        'etc/init.d/qrtr-ns', 'etc/init.d/wayne-wlan-fw', 'etc/init.d/wayne-wlan',
+        'usr/lib/wayne/wlan-load.sh', 'root/wifi-diag.sh',
     ]
     # wifi-scripts uses a directory; gate it by a payload beneath it as well.
     for name in required:
@@ -37,10 +46,10 @@ def check(image_path, source_kernel, expected_ujail=None):
     assert b'USE_PROCD=1' in files['etc/init.d/rmtfs'][1]
     assert b'start_service()' in files['etc/init.d/rmtfs'][1]
     assert b' -r -P ' in files['etc/init.d/rmtfs'][1], 'Read-only backing lost'
-    assert b"option allow_boot '0'" in files['etc/config/wayne-modem'][1]
+    assert b"option allow_boot '1'" in files['etc/config/wayne-modem'][1]
     assert 'etc/uci-defaults/11-anonmount' not in files, 'Internal RW automount default remains enabled'
     assert b"option anon_mount '0'" in files['etc/config/fstab'][1]
-    for svc, number in [('rmtfs', 95), ('usb-gadget', 95), ('modem-boot-trigger', 97), ('burnin-guard', 99), ('wpad', 19)]:
+    for svc, number in [('rmtfs', 95), ('usb-gadget', 95), ('modem-boot-trigger', 97), ('burnin-guard', 99), ('wpad', 19), ('qrtr-ns', 11), ('wayne-wlan-fw', 95), ('pd-mapper', 96), ('tqftpserv', 96), ('wayne-wlan', 99)]:
         mode, target = files[f'etc/rc.d/S{number}{svc}']
         assert stat.S_ISLNK(mode) and target == ('../init.d/' + svc).encode(), f'Bad service link {svc}'
     provenance = json.loads(files['etc/wayne-build.json'][1])
