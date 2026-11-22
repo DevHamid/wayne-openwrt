@@ -12,15 +12,28 @@
   learns the AP-side services it needs (rmtfs 14, servreg/pd-mapper 64, tqftp 4096) solely from
   NEW_SERVER announcements that arrive AFTER its boot. Daemons that announce once at their own start
   starve every later modem boot -> EFS/servreg/`server_check.txt` never answer -> ERR_FATAL every
-  ~41.8 s (117 crashes in one night). The build now ships the radio stack (`modem/radio-bin`:
-  pd-mapper, qrtr-ns, tqftpserv, locator-query, qrtr-lookup + `modem/pd-maps/MODEMR.JSN`/`MODEMUW.JSN`)
-  and `wayne-qrefresh`, which re-announces every service on each modem ONLINE transition.
-  Device-verified across a reboot: services auto-start, modem booted via the sysfs `boot` attribute,
-  qrefresh re-announced on ONLINE, and the modem ran 300+ s with **0 fatals** (was 41.8 s cadence),
-  actively using rmtfs and writing `server_check.txt` through tqftp. Diagnostics that pinned it down:
+  ~41.8 s (117 crashes in one night). The build ships the radio stack (`modem/radio-bin`:
+  pd-mapper, qrtr-ns, tqftpserv, locator-query, qrtr-lookup + `modem/pd-maps/MODEMR.JSN`/`MODEMUW.JSN`),
+  verified inside the flashable ROM.
+  The fix mechanism is now the **in-kernel QRTR service registry** (`net/qrtr/qrtr.c`, kernel commit
+  `3086e402` plus follow-ups on `debug/wayne-wlan-sfr-v2`): it answers lookups and pushes the service
+  table to a node at HELLO. `wayne-qrefresh` was **dropped** (`e7a1324`) — its per-boot daemon restarts
+  break the kernel servloc<->pd-mapper link and stall the WLAN probe chain.
+  Device-verified across a reboot (2026-11-22): services auto-start, modem booted via the sysfs `boot`
+  attribute, and the modem ran 300+ s with **0 fatals** (was 41.8 s cadence), actively using rmtfs and
+  writing `server_check.txt` through tqftp. Diagnostics that pinned it down:
   an SMEM reason scan at fatal time (no reason string exists on this firmware), a full modem ramdump
   (all zeros — the firmware scrubs its memory), and a QRTR probe daemon proving local services never
   receive lookups on this kernel.
+- **2026-11-22 — ROM content verified from CI, and a release-gate added.** Inspecting run #165
+  (`e0d2a09`) `wayne-openwrt-rom.zip` -> `system/rootfs.tar.gz` confirms every radio binary, PD map,
+  `pd-mapper`/`qrtr-ns`/`tqftpserv`/`wayne-wlan-fw` init service (with `S*` rc.d links), `rmtfs`,
+  `modem-boot-trigger`, and the WLAN firmware (`/lib/firmware/wlan/qca_cld/*` + uppercase copies).
+  **The registry lives only on `debug/wayne-wlan-sfr-v2`; the default `adios-wayne` kernel lacks it, so
+  a plain push build (run #164) would regress the modem fix.** `build.yml` now records
+  `qrtr_registry=present|absent` in `build/kernel-source.txt`, warns on `absent`, and the `release` job
+  refuses to publish a ROM that lacks it. *Still open:* Wi-Fi PHY (ICNSS firmware-ready) and native
+  cellular data — both need a device window.
 ## Current status (2026-11-19)
 
 The work is now **structure-first**. We are not treating the full-initramfs image as the product; it remains a RAM/test vehicle. The product path is:

@@ -240,6 +240,23 @@ jobs:
           # module guard fix. The old a1e6b3a compat patches do not apply.
           echo 'PASS: branch-native modem driver, build wiring, and wayne DTS present'
 
+      # Modem service-registry capability gate. The ~42 s modem ERR_FATAL
+      # loop fix has two mutually exclusive mechanisms: wayne-qrefresh
+      # (dropped in e7a1324) or the in-kernel QRTR service registry
+      # (net/qrtr/qrtr.c, commit 3086e402 on debug/wayne-wlan-sfr-v2).
+      # Record which one this kernel tree provides so the artifact is
+      # self-describing and the release job can refuse to publish a ROM
+      # that would silently regress the device-verified fix.
+      - name: Record QRTR service-registry capability
+        run: |
+          set -euo pipefail
+          if grep -q 'qrtr_svc_record' kernel/net/qrtr/qrtr.c; then
+            echo 'qrtr_registry=present' | tee -a build/kernel-source.txt
+          else
+            echo 'qrtr_registry=absent' | tee -a build/kernel-source.txt
+            echo "::warning::kernel lacks the in-kernel QRTR service registry and wayne-qrefresh is no longer installed; this image would regress the ~42 s modem ERR_FATAL fix. Do NOT tag a release from it."
+          fi
+
       - name: Apply OpenWrt config fragment
         run: |
           cd kernel
@@ -1015,6 +1032,27 @@ jobs:
           find dist -type f -name 'wayne-openwrt-rom*.zip' -exec cp -v {} out/ \;
           echo "--- release assets ---"
           ls -l out/
+
+      # Fail closed. A tag reuses the main-branch build, and that build may
+      # have used a kernel tree without the in-kernel QRTR service registry
+      # while wayne-qrefresh is no longer installed (dropped in e7a1324).
+      # Publishing such a ROM would silently regress the modem ERR_FATAL fix
+      # that was device-verified on 2026-11-22.
+      - name: Gate — refuse to publish a ROM without the modem registry fix
+        run: |
+          set -euo pipefail
+          KS="$(find dist -name kernel-source.txt | head -1)"
+          if [ -z "$KS" ]; then
+            echo "::error::kernel-source.txt missing from the reused build; cannot prove the modem registry fix is present."
+            exit 1
+          fi
+          echo "--- $KS ---"
+          cat "$KS"
+          if ! grep -qx 'qrtr_registry=present' "$KS"; then
+            echo "::error::Refusing to publish: the reused kernel build has no in-kernel QRTR service registry and wayne-qrefresh is not installed, so the ~42 s modem ERR_FATAL fix would regress. Rebuild main with a registry-bearing kernel_ref before tagging."
+            exit 1
+          fi
+          echo 'PASS: in-kernel QRTR service registry present — modem fix intact'
 
       - name: Extract release notes from CHANGELOG.md
         run: |
