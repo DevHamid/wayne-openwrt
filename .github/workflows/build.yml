@@ -197,13 +197,23 @@ jobs:
           cp ../../overlay-openwrt/etc/init.d/tqftpserv etc/init.d/tqftpserv
           cp ../../overlay-openwrt/etc/init.d/qrtr-ns etc/init.d/qrtr-ns
           cp ../../overlay-openwrt/etc/init.d/wayne-wlan-fw etc/init.d/wayne-wlan-fw
-          mkdir -p etc/config
+          # WLAN module loader. qcacld is built as a module (CONFIG_QCA_CLD_WLAN=m
+          # on debug/wayne-wlan-sfr-v2), so wlan.ko must be modprobe'd AFTER the
+          # modem/WPSS is online: icnss (built-in) only reaches FW-ready once the
+          # WLFW service (id 69) arrives on the QRTR bus, which is a modem
+          # subdomain. Nothing else in the rootfs loads it.
+          cp ../../overlay-openwrt/etc/init.d/wayne-wlan etc/init.d/wayne-wlan
+          install -D -m 0755 ../../overlay-openwrt/usr/lib/wayne/wlan-load.sh usr/lib/wayne/wlan-load.sh
+          mkdir -p etc/config root
           cp ../../overlay-openwrt/etc/config/wayne-modem etc/config/wayne-modem
-          chmod +x etc/init.d/pd-mapper etc/init.d/tqftpserv etc/init.d/qrtr-ns etc/init.d/wayne-wlan-fw
+          cp ../../scripts/wifi-diag.sh root/wifi-diag.sh
+          chmod +x etc/init.d/pd-mapper etc/init.d/tqftpserv etc/init.d/qrtr-ns \
+                   etc/init.d/wayne-wlan-fw etc/init.d/wayne-wlan root/wifi-diag.sh
           ln -sf ../init.d/qrtr-ns etc/rc.d/S11qrtr-ns
           ln -sf ../init.d/wayne-wlan-fw etc/rc.d/S95wayne-wlan-fw
           ln -sf ../init.d/pd-mapper etc/rc.d/S96pd-mapper
           ln -sf ../init.d/tqftpserv etc/rc.d/S96tqftpserv
+          ln -sf ../init.d/wayne-wlan etc/rc.d/S99wayne-wlan
           (find . -print0 | cpio --null -o --format=newc 2>/dev/null | gzip -9 > ../openwrt-initramfs.cpio.gz)
           ls -lh ../openwrt-initramfs.cpio.gz
 
@@ -623,6 +633,12 @@ jobs:
             || { echo "::error::burn-in guard missing from ROM rootfs"; exit 1; }
           test -L "$ROOTFS/etc/rc.d/S99burnin-guard" \
             || { echo "::error::burn-in guard rc link missing"; exit 1; }
+          test -x "$ROOTFS/usr/lib/wayne/wlan-load.sh" \
+            || { echo "::error::WLAN module loader missing from ROM rootfs"; exit 1; }
+          test -L "$ROOTFS/etc/rc.d/S99wayne-wlan" \
+            || { echo "::error::WLAN loader rc link missing (no PHY on boot)"; exit 1; }
+          test -x "$ROOTFS/root/wifi-diag.sh" \
+            || { echo "::error::wifi-diag.sh missing from ROM rootfs"; exit 1; }
           BL_KV=
           for module_dir in "$ROOTFS"/lib/modules/4.19*; do
             [ -d "$module_dir" ] || continue
