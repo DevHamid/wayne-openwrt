@@ -177,6 +177,33 @@ jobs:
           cp ../../scripts/modem-boot-trigger.init etc/init.d/modem-boot-trigger
           chmod +x etc/init.d/modem-boot-trigger
           ln -sf ../init.d/modem-boot-trigger etc/rc.d/S97modem-boot-trigger
+          # Radio services (verified fix for the ~42 s modem ERR_FATAL
+          # loop): pd-mapper/qrtr-ns (servreg registry + NS), tqftpserv
+          # (TFTP server_check.txt) and the qrefresh watcher.  The 4.19
+          # qrtr has no in-kernel nameserver and drops local lookups, so a
+          # fresh modem incarnation only learns AP services from
+          # announcements arriving after its boot; qrefresh re-announces on
+          # every modem ONLINE transition.
+          mkdir -p usr/lib/wayne/radio usr/share/wayne/pd-maps
+          cp ../../modem/radio-bin/pd-mapper usr/lib/wayne/radio/pd-mapper
+          cp ../../modem/radio-bin/qrtr-ns usr/lib/wayne/radio/qrtr-ns
+          cp ../../modem/radio-bin/locator-query usr/lib/wayne/radio/locator-query
+          cp ../../modem/radio-bin/qrtr-lookup usr/lib/wayne/radio/qrtr-lookup
+          cp ../../modem/radio-bin/tqftpserv usr/bin/tqftpserv
+          cp ../../modem/pd-maps/MODEMR.JSN usr/share/wayne/pd-maps/MODEMR.JSN
+          cp ../../modem/pd-maps/MODEMUW.JSN usr/share/wayne/pd-maps/MODEMUW.JSN
+          chmod +x usr/lib/wayne/radio/* usr/bin/tqftpserv
+          cp ../../overlay-openwrt/etc/init.d/pd-mapper etc/init.d/pd-mapper
+          cp ../../overlay-openwrt/etc/init.d/tqftpserv etc/init.d/tqftpserv
+          cp ../../overlay-openwrt/etc/init.d/qrtr-ns etc/init.d/qrtr-ns
+          cp ../../overlay-openwrt/etc/init.d/wayne-qrefresh etc/init.d/wayne-qrefresh
+          mkdir -p usr/lib/wayne
+          cp ../../overlay-openwrt/usr/lib/wayne/qrefresh.sh usr/lib/wayne/qrefresh.sh
+          chmod +x etc/init.d/pd-mapper etc/init.d/tqftpserv etc/init.d/qrtr-ns etc/init.d/wayne-qrefresh usr/lib/wayne/qrefresh.sh
+          ln -sf ../init.d/qrtr-ns etc/rc.d/S11qrtr-ns
+          ln -sf ../init.d/pd-mapper etc/rc.d/S96pd-mapper
+          ln -sf ../init.d/tqftpserv etc/rc.d/S96tqftpserv
+          ln -sf ../init.d/wayne-qrefresh etc/rc.d/S98wayne-qrefresh
           (find . -print0 | cpio --null -o --format=newc 2>/dev/null | gzip -9 > ../openwrt-initramfs.cpio.gz)
           ls -lh ../openwrt-initramfs.cpio.gz
 

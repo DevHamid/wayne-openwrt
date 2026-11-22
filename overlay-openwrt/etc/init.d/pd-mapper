@@ -1,0 +1,14 @@
+#!/bin/sh /etc/rc.common
+# servreg registry (pd-mapper): answers the modem's protection-domain
+# queries from the authentic PD maps. Required by the WLAN domain.
+USE_PROCD=1
+START=96
+STOP=10
+start_service() {
+	procd_open_instance
+	procd_set_param command /usr/lib/wayne/radio/pd-mapper -d /usr/share/wayne/pd-maps
+	procd_set_param respawn 3600 5 5
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}
