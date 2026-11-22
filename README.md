@@ -6,6 +6,20 @@
 
 ## Current status (2026-11-22)
 
+- **2026-11-22 (later) — boot-loop root-caused and fixed: AP kernel panic in the IPA QMI driver.**
+  The device reboot-looped on the registry image. `pstore`/ramoops captured **6 identical fatal
+  crashes** across boots: on every modem boot the modem's IPA QMI service arrives and
+  `ipa_q6_clnt_svc_arrive()` → `ipa_qmi_send_req_wait()` → `qmi_txn_cancel()` locked a mutex inside a
+  **freed vmalloc page** (`Unable to handle kernel paging request`, `pte=0`) → `Kernel panic - not
+  syncing: Fatal exception` → `Causing a watchdog bite!` → reboot. Cause: `ipa_qmi_service.c` freed the
+  **singleton** QMI client handle (`vfree(ipa_q6_clnt)`) on the modem-SSR error path while in-flight
+  transactions (`txn->handle`) and the delayed service work still referenced it. The modem coming up is
+  the *fix working* — it just exposed this latent vendor-driver bug.
+  **Fix:** kernel commit `f997eb3` on `debug/wayne-wlan-sfr-v2` — do not free the singleton there;
+  release it only in `ipa_qmi_service_exit_worker()`, and let a later service event retry the handshake.
+  Built in CI run **#170** (all jobs green). Artifact confirmed: `ref=debug/wayne-wlan-sfr-v2 @ f997eb3`,
+  `qrtr_registry=present`. Full captured crash log: `wayne-crash.log`.
+
 - **2026-11-22 — the ~42 s modem ERR_FATAL loop is root-caused and fixed (verified on device, reboot-persistent).**
   The loop was service starvation, not kernel/firmware breakage: this 4.19 CAF qrtr has no in-kernel
   nameserver and forwards control packets to remote nodes only, so a freshly booted modem incarnation
