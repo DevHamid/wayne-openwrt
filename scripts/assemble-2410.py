@@ -207,6 +207,10 @@ def main():
     for source, target in [
         ('overlay-openwrt/init', 'init'),
         ('overlay-common/usb-gadget.sh', 'usb-gadget.sh'),
+        # Persistent layout: init.d/usb-gadget sources this path on the ROM
+        # (the root-level copy above is RAM/bootstrap-only and is stripped
+        # from the ROM tar).
+        ('overlay-common/usb-gadget.sh', 'usr/lib/wayne/usb-gadget.sh'),
         ('overlay-openwrt/usb-gadget.init', 'etc/init.d/usb-gadget'),
         ('overlay-openwrt/usr/sbin/wayne-ota', 'usr/sbin/wayne-ota'),
         ('scripts/screen.sh', 'root/screen.sh'),
