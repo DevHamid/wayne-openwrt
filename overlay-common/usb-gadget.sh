@@ -9,6 +9,18 @@ log() {
   echo "usb-gadget: $*" > /dev/kmsg 2>/dev/null || true
 }
 
+# Bring the ECM interface administratively up so the HOST sees carrier.
+# We cannot rely on netifd: on this vendor 4.19 tree netifd never instantiated
+# br-lan (ifstatus: NO_DEVICE), and the 24.10 rootfs ships no /etc/config/network.
+# A down usb0 gives the host cdc_ether carrier=0 -> no DHCP/SSH path at all.
+# Best-effort only: a missing `ip`/`ifconfig` must not fail the gadget build.
+usb0_link_up() {
+    [ -e /sys/class/net/usb0 ] || return 0
+    ip link set usb0 up 2>/dev/null || ifconfig usb0 up 2>/dev/null || true
+    ip addr add 192.168.1.1/24 dev usb0 2>/dev/null || true
+    log "usb0 link: carrier=$(cat /sys/class/net/usb0/carrier 2>/dev/null) state=$(cat /sys/class/net/usb0/operstate 2>/dev/null)"
+}
+
 usb_gadget_up() {
     log "START"
     # 1) Ensure sysfs/configfs are up
@@ -42,6 +54,7 @@ usb_gadget_up() {
         n=0
         while [ ! -e /dev/ttyGS0 ] && [ $n -lt 15 ]; do sleep 1; n=$((n+1)); done
         [ -e /dev/ttyGS0 ] && log "ttyGS0 ready" || log "ttyGS0 missing"
+        usb0_link_up
         return 0
     fi
 
@@ -88,6 +101,7 @@ usb_gadget_up() {
     n=0
     while [ ! -e /sys/class/net/usb0 ] && [ $n -lt 10 ]; do sleep 1; n=$((n+1)); done
     [ -e /sys/class/net/usb0 ] && log "usb0 ready" || log "usb0 missing"
+    usb0_link_up
 
     log "END ok"
     return 0
