@@ -70,6 +70,21 @@ discover_backlight
 STATE=/root/.screen.bright
 PIDF=/root/.screen.pid
 VETO=/tmp/.screen.on
+# Deadline bookkeeping. $STATE only records the brightness value; the *time* the
+# panel was last lit must also survive a reboot. Without it, a device that resets
+# before the idle timer expires (modem SSR -> kernel panic -> reboot) restarts the
+# 90 s countdown from zero on every boot and the panel never blanks at all.
+# /root lives on the persistent SYSTEM partition, unlike /tmp.
+ONSINCE=/root/.screen.on_since
+
+mark_lit() { date +%s > "$ONSINCE" 2>/dev/null || true; }
+elapsed_lit() {
+    now=$(date +%s)
+    s=$(cat "$ONSINCE" 2>/dev/null)
+    case "$s" in ''|*[!0-9]*) echo 0; return ;; esac
+    [ "$s" -gt "$now" ] && { echo 0; return; }
+    echo $((now - s))
+}
 
 max() { cat "$MAXF" 2>/dev/null || echo 4095; }
 
@@ -94,6 +109,8 @@ do_on() {
     echo 0 > "$FB/blank" 2>/dev/null
     if [ -f "$STATE" ]; then cat "$STATE" > "$BL" 2>/dev/null
     else echo "$(max)" > "$BL" 2>/dev/null; fi
+    # Restart the idle countdown from this moment.
+    mark_lit
 }
 
 kill_prev() {
@@ -173,17 +190,23 @@ guard)
     # DETACHED boot guard. See guardfg for the procd (foreground) twin.
     N=${2:-90}; R=${3:-20}
     kill_prev; rm -f "$VETO"
+    # Honour time the panel already spent lit on earlier boots. A device that
+    # reboots every ~70 s (modem SSR panic) would otherwise never reach the
+    # deadline, because each boot restarts the full countdown.
+    [ -f "$ONSINCE" ] || mark_lit
+    _e=$(elapsed_lit); [ "$_e" -gt "$N" ] && _e=$N
+    _w=$((N - _e))
     (
         trap '' HUP INT TERM
-        echo "$(date '+%H:%M:%S') guard armed (off in ${N}s, re-assert ${R}s)" >> /root/screen.log
-        sleep "$N"
+        echo "$(date '+%H:%M:%S') guard armed (lit ${_e}s, off in ${_w}s, re-assert ${R}s)" >> /root/screen.log
+        sleep "$_w"
         while :; do
             [ -f "$VETO" ] && do_on || do_off
             sleep "$R"
         done
     ) >/dev/null 2>&1 &
     echo $! > "$PIDF"
-    echo "guard started (off in ${N}s, re-assert every ${R}s, pid $!)"
+    echo "guard started (off in ${_w}s [${_e}s already lit], re-assert every ${R}s, pid $!)"
     ;;
 guardfg)
     # FOREGROUND twin of `guard`, run by procd (burnin-guard init script).
@@ -192,8 +215,13 @@ guardfg)
     # The VETO flag lets `screen.sh on` win without fighting a respawned guard.
     N=${2:-90}; R=${3:-20}
     kill_prev; rm -f "$VETO"
-    echo "$(date '+%H:%M:%S') guardfg armed (off in ${N}s, re-assert ${R}s)" >> /root/screen.log
-    sleep "$N"
+    # Same cross-reboot deadline as `guard`: count the time the panel has
+    # already been lit, so a boot loop cannot postpone the blank forever.
+    [ -f "$ONSINCE" ] || mark_lit
+    e=$(elapsed_lit); [ "$e" -gt "$N" ] && e=$N
+    w=$((N - e))
+    echo "$(date '+%H:%M:%S') guardfg armed (lit ${e}s, blank in ${w}s, re-assert ${R}s)" >> /root/screen.log
+    sleep "$w"
     while :; do
         [ -f "$VETO" ] && do_on || do_off
         sleep "$R"
