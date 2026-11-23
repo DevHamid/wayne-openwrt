@@ -2,9 +2,22 @@
 
 **Booting a full [ImmortalWrt](https://downloads.immortalwrt.org/) (OpenWrt fork) on the Xiaomi Mi 6X (wayne, SDM660) — on the stock/vendor Linux 4.19 kernel tree.**
 
-**Vision / definition of done:** phone = pocket modem + services box, finished entirely on vendor kernel 4.19 + OpenWrt 21.02. **The finish line = a flashable OpenWrt ROM installable from TWRP/OrangeFox (recovery zip) — no PC, no fastboot.** Mainline kernel + OpenWrt 25/newest are a *future* track after v1.0 (mainline still buggy: partial modem, broken power management — moving now would break more than it fixes).
+**Vision / definition of done:** phone = pocket modem + services box, finished entirely on vendor kernel 4.19 + ImmortalWrt **24.10** (OpenWrt fork). **The finish line = a flashable OpenWrt ROM installable from TWRP/OrangeFox (recovery zip) — no PC, no fastboot.** Mainline kernel + OpenWrt 25/newest are a *future* track after v1.0 (mainline still buggy: partial modem, broken power management — moving now would break more than it fixes).
 
-## Current status (2026-11-22)
+## Current status (updated 2026-11-23)
+
+- **2026-11-23 — 24.10 promoted to the main flashable ROM; a second bootstrap defect (PID 1) found and fixed.**
+  ImmortalWrt **24.10.4** is now the production line. The 24.10 rootfs gained the full radio stack
+  (`pd-mapper`, `qrtr-ns`, `tqftpserv`, `locator-query`, `qrtr-lookup` + `MODEMR.JSN`/`MODEMUW.JSN`),
+  the modem firmware PIL aliases, and the WLAN loader (`S99wayne-wlan` + `wlan-load.sh`); modem
+  auto-boot is re-enabled (`allow_boot=1`, safe after the IPA fix). It is packaged as a real
+  recovery zip (`boot/boot.img` + `system/rootfs.tar.gz`) with hard CI gates — run **#183** green,
+  released publicly as **`m9-2410-complete-87ef463`**. Bring-up also surfaced a bootstrap regression:
+  an earlier edit had dropped `exec` from the `switch_root` handoff, which BusyBox requires to keep
+  PID 1 alive across the handoff; restored in `overlay-system/init` and covered by a process-level
+  test. On the device, the phone booted **24.10.4 from the SYSTEM partition** (`/dev/mmcblk0p61`) and
+  passed full component verification (radio stack, `wlan.ko`, provenance `87ef4634`), but the USB link
+  then became unstable. **Open item: re-verify stable boot + modem + Wi-Fi on 24.10 on the device.**
 
 - **2026-11-22 (later) — boot-loop root-caused and fixed: AP kernel panic in the IPA QMI driver.**
   The device reboot-looped on the registry image. `pstore`/ramoops captured **6 identical fatal
