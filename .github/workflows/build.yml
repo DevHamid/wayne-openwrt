@@ -9,7 +9,7 @@ on:
       kernel_ref:
         description: Kernel branch/tag to build (instrumented branches allowed)
         required: false
-        default: adios-wayne
+        default: debug/wayne-wlan-sfr-v2
 
 jobs:
   build:
