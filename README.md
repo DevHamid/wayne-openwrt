@@ -125,6 +125,8 @@ OrangeFox/TWRP recovery zip
 
 ## Roadmap (interactive blueprint)
 
+![Wayne roadmap board](docs/diagrams/roadmap.svg)
+
 **Overall state:** M1–M7 closed; M8 active; M9 structure frozen but runtime handoff still pending.
 
 ```
