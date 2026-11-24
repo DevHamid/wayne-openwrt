@@ -26,6 +26,19 @@ network** — the hard part is behind us.
 
 ---
 
+## 🆕 Latest update (late Nov 24)
+
+- The modem software suite (**ModemManager** + a modem page in the router web UI) is **built into
+  the ROM** and published as a release.
+- Installing it on the test phone taught us two things, both now fixed:
+  1. The phone runs OpenWrt **directly from the same flash partition the ROM installs to**, so the
+     installer was rewritten to upgrade "in place" instead of wiping the running system.
+  2. The modem-stability fix almost didn't make it into the packaged ROM — now the build
+     **fails on purpose** if that piece is missing, so it can never happen again.
+- The first in-place upgrade is applied and verified on the flash, but the phone hasn't come back
+  on its USB link yet after the switch — recovery is automated and will finish the job as soon as
+  the phone reappears (a power cycle works too).
+
 ## 🔧 What we did to get here
 
 1. **Made the phone reachable** — a reliable network link over the USB cable, plus a serial console.
