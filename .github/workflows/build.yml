@@ -1,5 +1,9 @@
 name: Build OpenWrt Wayne
 
+permissions:
+  contents: write
+  actions: write
+
 on:
   push:
     branches: [main]
@@ -735,6 +739,19 @@ jobs:
           fi
           echo "OTG hard gate PASSED: all OTG symbols resolved =y"
 
+      # Diagrams are a function of the commit graph, and a finished build is the
+      # moment the repo state is worth recording. docs.yml is a separate workflow
+      # (a broken build must never block docs, and vice versa); this only pokes it.
+      - name: Refresh docs diagrams
+        if: success() && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh workflow run docs.yml --ref main \
+            && echo "docs.yml dispatched" \
+            || echo "::warning::could not dispatch docs.yml (needs actions: write)""
+
   # ---- Test: can the 23.05 armsr/armv8 rootfs run on our 4.19 kernel? ----
   # The main build pins 21.02.7 (kernel 5.4) because it is contemporary with
   # our 4.19 vendor kernel. 23.05 (armsr/armv8, kernel 5.15) and 24.10
@@ -1106,7 +1123,8 @@ jobs:
           import os, re, pathlib
           tag = os.environ['GITHUB_REF_NAME']
           text = pathlib.Path('CHANGELOG.md').read_text()
-          m = re.compile(r'^## \[' + re.escape(tag) + r'\]', re.M).search(text)
+          # generated blocks are '## v0.10.0', hand-written ones '## [v0.10.0]'
+          m = re.compile(r'^## \[?' + re.escape(tag) + r'\]?', re.M).search(text)
           if m:
               nxt = re.compile(r'^## ', re.M).search(text, m.end())
               body = text[m.start(): nxt.start() if nxt else len(text)].strip()
