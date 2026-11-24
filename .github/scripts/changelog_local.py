@@ -19,7 +19,8 @@ import re
 import subprocess
 import sys
 
-TYPES = [  # shared map, in changelogen order
+TYPES = [  # shared map, in changelogen order; upstream first for fork repos
+    ("upstream", "⬆️ Upstream intake"),
     ("feat", "🚀 Enhancements"),
     ("fix", "🩹 Fixes"),
     ("perf", "🔥 Performance"),
@@ -32,7 +33,9 @@ TYPES = [  # shared map, in changelogen order
     ("ci", "🤖 CI"),
     ("examples", "🏀 Examples"),
     ("chore", "🏡 Chore"),
+    ("kernel", "🔧 Subsystem changes"),
     ("other", "🧩 Other"),
+    ("revert", "↩️ Reverts & re-applies"),
 ]
 TITLE = dict(TYPES)
 ORDER = {t: i for i, (t, _) in enumerate(TYPES)}
@@ -48,6 +51,13 @@ SCOPE_ICONS = {
     "docker": "🐳", "power": "🔋", "vbus": "🔋", "recovery": "🛟", "boot": "🛟",
 }
 SCOPE_ICON_FALLBACK = "🏷️"
+
+REVERT = re.compile(r'^(Revert|Reapply)\s+"', re.I)
+UPSTREAM = re.compile(r'^(UPSTREAM|BACKPORT|FROMGIT|FROMLIST|ANDROID|CHERRY-PICK|CHERRY):\s*', re.I)
+SUBSYS = re.compile(r'^([A-Za-z0-9_+./-]{2,24}(?:,\s*[A-Za-z0-9_+./-]{2,24})*):\s+')
+
+BRACKET = re.compile(r"^(?:\[[A-Za-z][^\]]{0,20}\]\s*|(?:squash|fixup)!\s*)+")
+BRACKET_UPSTREAM = re.compile(r"^\[(?:backport|upstream|fromgit|fromlist)\]", re.I)
 
 CONV = re.compile(r"^(?P<type>[a-zA-Z]+)(?:\((?P<scope>[^)]*)\))?(?P<bang>!)?:\s*(?P<subject>.+)$")
 PREFIX = re.compile(r"^([A-Za-z0-9][\w.\-]*)\s*[:\s]\s*(.+)$")
@@ -69,21 +79,55 @@ def log(repo: str, rng: list[str]) -> list[dict]:
     return commits
 
 
-def classify(c: dict, legacy: dict[str, str], fallback: str) -> dict:
-    m = CONV.match(c["subject"])
+def strip_upstream(subject: str) -> tuple[str, bool]:
+    """'BACKPORT: FROMGIT: net: ...' -> ('net: ...', True), chained tags removed."""
+    hit = False
+    while True:
+        u = UPSTREAM.match(subject)
+        if not u:
+            return subject, hit
+        subject = subject[u.end():]
+        hit = True
+
+
+def classify(c: dict, legacy: dict[str, str], fallback: str, kernel_sections: bool = False) -> dict:
+    if REVERT.match(c["subject"]):
+        return {**c, "type": "revert", "scope": None,
+                "subject": REVERT.sub("", c["subject"]).rstrip('"'), "breaking": False}
+
+    subject, was_upstream = strip_upstream(c["subject"])
+    if BRACKET_UPSTREAM.match(subject):
+        was_upstream = True
+    subject = BRACKET.sub("", subject).strip() or subject
+    if was_upstream:
+        return {**c, "type": "upstream", "scope": None, "subject": subject,
+                "breaking": "BREAKING CHANGE" in c["body"].upper()}
+
+    m = CONV.match(subject)
     if m:
         t = m.group("type").lower()
         if t in TITLE:
             scope, subject = m.group("scope"), m.group("subject")
         else:
-            # 'wlan: ...' looks conventional but is a subsystem prefix, not a
-            # type - map it and keep the prefix as the scope, so the sentence
-            # does not repeat it.
+            # 'wlan: ...' looks conventional but the prefix is a subsystem, not a
+            # type. In a kernel tree that is the normal shape ('mm:', 'bpf:'),
+            # so --kernel-sections claims it; otherwise map it explicitly and
+            # keep the prefix as the scope so the sentence does not repeat it.
             raw = m.group("type")
+            if kernel_sections and SUBSYS.match(subject):
+                return {**c, "type": "kernel", "scope": raw, "subject": m.group("subject"),
+                        "breaking": "BREAKING CHANGE" in c["body"].upper()}
             t = legacy.get(raw) or legacy.get(raw.lower()) or fallback
             scope, subject = raw, m.group("subject")
     else:
-        p = PREFIX.match(c["subject"])
+        # Subsystem prefix first: 'bpf, sockmap:' and 'mm/page_alloc.c:' are not
+        # 'word:' shapes, so PREFIX alone would miss them.
+        ksub = SUBSYS.match(subject)
+        if kernel_sections and ksub:
+            return {**c, "type": "kernel", "scope": ksub.group(1),
+                    "subject": subject[ksub.end():],
+                    "breaking": "BREAKING CHANGE" in c["body"].upper()}
+        p = PREFIX.match(subject)
         raw = p.group(1) if p else ""
         t = legacy.get(raw) or legacy.get(raw.lower()) or fallback
         scope = raw or None
@@ -157,6 +201,10 @@ def main() -> None:
     ap.add_argument("--exclude", default="", help="comma list of types to drop")
     ap.add_argument("--legacy-map", default="", help="prefix=type pairs for non-conventional history")
     ap.add_argument("--fallback", default="other", help="type for unmappable commits ('skip' drops them)")
+    ap.add_argument("--drop-reverts", action="store_true",
+                    help="omit Revert/Reapply commits (a revert+reapply pair cancels out)")
+    ap.add_argument("--kernel-sections", action="store_true",
+                    help="treat 'mm: ...', 'ext4: ...' prefixes as kernel subsystems, not types")
     ap.add_argument("--no-contributors", action="store_true", help="drop the Contributors section")
     ap.add_argument("--out", default="-")
     a = ap.parse_args()
@@ -169,7 +217,11 @@ def main() -> None:
 
     rng = [f"{a.frm}..{a.to}"] if a.frm else []
     raw = log(a.git, rng)
-    commits = [classify(c, legacy, fallback) for c in raw]
+    commits = [classify(c, legacy, fallback, a.kernel_sections) for c in raw]
+    if a.drop_reverts:
+        dropped = [c for c in commits if c["type"] == "revert"]
+        commits = [c for c in commits if c["type"] != "revert"]
+        print(f"reverts: dropped {len(dropped)} Revert/Reapply commits", file=sys.stderr)
     if a.fallback == "skip":
         commits = [c for c in commits if c["type"] != fallback]
 
