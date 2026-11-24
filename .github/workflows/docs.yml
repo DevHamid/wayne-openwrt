@@ -1,0 +1,55 @@
+# Docs pipeline: regenerate the README roadmap SVG and keep it deterministic.
+# Separate from the build/kernel workflows on purpose — a build failure must
+# never block docs, and a docs commit must not retrigger builds or itself.
+name: docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "README.md"
+      - "docs/diagrams/**"
+      - ".github/scripts/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  diagrams:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: render roadmap from README
+        run: |
+          mkdir -p docs/diagrams .github/scripts
+          python3 .github/scripts/render_kanban.py --src README.md --section Roadmap --out docs/diagrams/roadmap.svg
+
+      - name: verify assets are GitHub-safe and legible
+        run: |
+          for f in docs/diagrams/*.svg; do
+            xmllint --noout "$f"
+            ! grep -Eq 'foreignObject|<script|@import|https?://[^"<]*\.(png|jpg|woff|woff2)' "$f"
+          done
+          python3 .github/scripts/verify_contrast.py docs/diagrams/*.svg
+
+      - name: verify determinism (hand-edited SVGs fail here)
+        run: |
+          python3 .github/scripts/render_kanban.py --src README.md --section Roadmap --out /tmp/roadmap.svg
+          cmp /tmp/roadmap.svg docs/diagrams/roadmap.svg
+
+      - name: commit back
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/diagrams
+          git diff --staged --quiet || git commit -m "docs: regenerate roadmap diagram [skip ci]"
+          git push origin "HEAD:main"
