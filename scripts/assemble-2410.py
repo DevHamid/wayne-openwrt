@@ -336,7 +336,7 @@ def main():
     for name, order in [('qrtr-ns', 11), ('usb-gadget', 95), ('rmtfs', 95),
                         ('wayne-wlan-fw', 95), ('pd-mapper', 96), ('tqftpserv', 96),
                         ('modem-boot-trigger', 97), ('wayne-wlan', 99),
-                        ('burnin-guard', 99)]:
+                        ('burnin-guard', 99), ('diag-reader', 99), ('modemmanager', 95)]:
         link = root / f'etc/rc.d/S{order}{name}'
         link.unlink(missing_ok=True)
         link.symlink_to('../init.d/' + name)
