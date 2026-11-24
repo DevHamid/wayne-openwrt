@@ -6,6 +6,63 @@ where each release also carries the built boot images as downloadable assets.
 
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## v0.10.0
+
+**2026-11-24** · [compare changes](https://github.com/DevHamid/wayne-openwrt/compare/v0.9.16...v0.10.0)
+
+### 🚀 Enhancements
+
+- 📡 **modem:** add ModemManager LTE data-call bring-up script ([`c06dda3`](https://github.com/DevHamid/wayne-openwrt/commit/c06dda38582f658331429123526c359baf351a2c))
+
+### 🩹 Fixes
+
+- make split ROM bootstrap fail closed ([`f85eb34`](https://github.com/DevHamid/wayne-openwrt/commit/f85eb343ae5deab6f4d2efde583c7422da622ab6))
+- avoid SIGPIPE in OTA manifest rootfs gate ([`2a98477`](https://github.com/DevHamid/wayne-openwrt/commit/2a984775037acbc9c423ed3a656649291ef3a029))
+- use single-write sysfs updates in screen guard ([`42868de`](https://github.com/DevHamid/wayne-openwrt/commit/42868def284e079517e5f72d0a05c3b8ccfaa287))
+- stage USB gadget helper in ROM rootfs ([`7b24eac`](https://github.com/DevHamid/wayne-openwrt/commit/7b24eac854ce3d8d48ab76cc3b8ac0316ad27643))
+- 📦 **rom:** install script v2 — live-root tar overlay instead of reformatting the running root ([`0bd1a18`](https://github.com/DevHamid/wayne-openwrt/commit/0bd1a18614ad80f68e18fcf79568abb461f0a5ce))
+- 📦 **rom:** include the diag-reader init in the assembled rootfs ([`2e227fa`](https://github.com/DevHamid/wayne-openwrt/commit/2e227fab8bda3b70e101ed87352b5e54b151e4b7))
+
+### 📖 Documentation
+
+- add first-install clarification and OTA prerequisites to README ([`5cf6f33`](https://github.com/DevHamid/wayne-openwrt/commit/5cf6f33675c6e844f64cad14ffa31421fd5fe79c))
+- 📖 **README:** 2026-11-22 status — modem ERR_FATAL loop root-caused and fixed ([`0b5b6a4`](https://github.com/DevHamid/wayne-openwrt/commit/0b5b6a4a9d879fcc23b691e3b82f6f04ac9a7eac))
+- record the Wi-Fi root cause + wlan.ko late-load fix; drop dead qrefresh files ([`4dc37c5`](https://github.com/DevHamid/wayne-openwrt/commit/4dc37c50cb8870ee7c4ef07d11c55ae40bc4bd3d))
+- boot-loop root cause — AP panic in IPA QMI handle use-after-free ([`94e688b`](https://github.com/DevHamid/wayne-openwrt/commit/94e688b5a5e460f346ded8a9bd7281d52292d8e7))
+- record 24.10 promotion and the PID-1 bootstrap fix in the README ([`da50f22`](https://github.com/DevHamid/wayne-openwrt/commit/da50f22607a765ed4890a32f8b0c705771427791))
+- embed the generated roadmap SVG in the README ([`11a292c`](https://github.com/DevHamid/wayne-openwrt/commit/11a292c139859c75c389acdc426c4089316769e5))
+- add plain-language progress report for the Wayne pocket modem ([`1ec2679`](https://github.com/DevHamid/wayne-openwrt/commit/1ec267977b9106089671d8b7a89f120451fe9734))
+- 2026-11-24 status — diag starvation root-caused and fixed, modem stable + registered ([`5536842`](https://github.com/DevHamid/wayne-openwrt/commit/55368429b9f38f2bebefad64380c23039a5464d8))
+- 🏷️ **progress:** late-Nov-24 update — ModemManager ROM released, installer rewritten for the live-root layout, recovery automated ([`5825e3d`](https://github.com/DevHamid/wayne-openwrt/commit/5825e3de5c2aa7abe0d028a523cc49b23f3f3acc))
+- 2026-11-24 late — ModemManager ROM released; live-root installer v2; diag-reader now in every rootfs ([`67f5a39`](https://github.com/DevHamid/wayne-openwrt/commit/67f5a3915e33206c3b29d6bc25214a2b7466702e))
+- add generated roadmap SVG (rendered from the README roadmap) ([`9355c40`](https://github.com/DevHamid/wayne-openwrt/commit/9355c4014957f86bc08366d9acc4047a151c4b4a))
+
+### 📦 Build
+
+- 📦 **2410:** promote ImmortalWrt 24.10.4 to a flashable production ROM ([`12d48a4`](https://github.com/DevHamid/wayne-openwrt/commit/12d48a4e31f6301a1d17da936d8d72e05f3c0b83))
+- 📦 **2410:** allow the RAM diagnostic image to carry the full rootfs ([`47a1279`](https://github.com/DevHamid/wayne-openwrt/commit/47a127906a22335c95c3e5ab13a69f6ac8abc3e1))
+- 📦 **2410:** fix false 'missing file' ROM gate caused by grep -q under pipefail ([`4d5856e`](https://github.com/DevHamid/wayne-openwrt/commit/4d5856eb55096913074b2042f071817bdb6befa3))
+- 📦 **2410:** parameterize the boot-size guard in check-2410.py too ([`5052e3b`](https://github.com/DevHamid/wayne-openwrt/commit/5052e3ba37dd969bcc1d19168c0015fc6e6320ec))
+- 🏷️ **check-pack:** fix off-by-one reading the optional MAX_MIB argument ([`9266b65`](https://github.com/DevHamid/wayne-openwrt/commit/9266b65720952476ea054cf006030f8bbd1dcb0a))
+- gate ROM publication on the QRTR service registry ([`a570a5d`](https://github.com/DevHamid/wayne-openwrt/commit/a570a5db4a25bd44d27ebb4817665cb637528c72))
+- stage WLAN firmware + enable modem auto-boot in image ([`cc88db4`](https://github.com/DevHamid/wayne-openwrt/commit/cc88db4087805d1b6bc899934e51c1a62722c187))
+- drop wayne-qrefresh — the qrtr kernel registry supersedes it ([`e7a1324`](https://github.com/DevHamid/wayne-openwrt/commit/e7a1324778bc2277540fc86901762e6f65e45f6c))
+- 📦 **2410:** install the persistent USB gadget helper into the ROM rootfs ([`87ef463`](https://github.com/DevHamid/wayne-openwrt/commit/87ef4634be7060ad19f48b9994d29f134b47bc6d))
+- 📦 **2410:** assemble ModemManager + LuCI modem glue; enforce 24.10 baseline ([`a4546f5`](https://github.com/DevHamid/wayne-openwrt/commit/a4546f5b4219cdfddf746656eebbf070fffbd205))
+
+### 🧩 Other
+
+- 🏷️ **wayne:** ship modem radio services + qrefresh re-announcer ([`8a8fe83`](https://github.com/DevHamid/wayne-openwrt/commit/8a8fe8319cc7afcde7e44613df592ad70517879a))
+- 🔌 **usb:** link usb0 up in the gadget helper instead of relying on netifd ([`1d33bc9`](https://github.com/DevHamid/wayne-openwrt/commit/1d33bc980c2d625c641323c4ecdc584cf62e8dcc))
+- 🔌 **usb:** await gadget UDC bind before switch_root so the management link survives ([`5628230`](https://github.com/DevHamid/wayne-openwrt/commit/56282302e55c2fb4405e1cbe8d10193c47ede4de))
+- 🏷️ **Add:** diag-reader init service: keep modem DIAG drained ([`014b057`](https://github.com/DevHamid/wayne-openwrt/commit/014b0572063f4cad3d628a92db93384891402445))
+
+### ❤️ Contributors
+
+- shifu
+- Ahmad Syarwan Hamid
+- DevHamid
+
 ## [v0.9.10] — M7 probe script
 
 `scripts/m7-docker-probe.sh` → `/root/m7.sh` (installed by `build.yml`, re-copied
