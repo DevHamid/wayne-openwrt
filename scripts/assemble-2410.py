@@ -21,6 +21,22 @@ ROOTFS_URL = ('https://downloads.immortalwrt.org/releases/24.10.4/targets/armsr/
               'immortalwrt-24.10.4-armsr-armv8-rootfs.tar.gz')
 ROOTFS_SHA256 = '16e1cd7c5dfb4b944119024843612b39afc1e6980383c6114a5966cca1b77fc5'
 BASE = 'https://downloads.immortalwrt.org/releases/24.10.4/packages/aarch64_generic/base/'
+# ImmortalWrt 24.10 is the MANDATORY baseline for this project (operator
+# directive, 2026-11-24). Never assemble or ship a 21.02-era rootfs; the CI
+# gate asserts the assembled rootfs reports rootfs == '24.10.4' in
+# etc/wayne-build.json. Downgrades are a build failure by design.
+REQUIRED_ROOTFS = '24.10.4'
+# Package repositories searched when injecting extra userspace. modemmanager
+# and friends live in the community `packages` feed, the LuCI protocol handler
+# in `luci`; only `ppp` comes from `base`.
+PKG_REPOS = {
+    'base': BASE,
+    'packages': 'https://downloads.immortalwrt.org/releases/24.10.4/packages/aarch64_generic/packages/',
+    'luci': 'https://downloads.immortalwrt.org/releases/24.10.4/packages/aarch64_generic/luci/',
+}
+assert VERSION == REQUIRED_ROOTFS, (
+    f'ImmortalWrt {REQUIRED_ROOTFS} is the mandatory baseline; refusing to assemble {VERSION}. '
+    'Do not downgrade to 21.02 — update REQUIRED_ROOTFS only with an explicit operator decision.')
 
 
 def fetch(url):
@@ -145,6 +161,70 @@ def install_wifi(root):
     return [{k: p[k] for k in ('Package', 'Version', 'Filename', 'SHA256sum')} for p in added.values()]
 
 
+def install_modem(root):
+    """Install ModemManager + LuCI glue so the built-in sdm660 modem is
+    controllable from OpenWrt. ModemManager's `qcom-soc` plugin speaks QMI
+    over QRTR and runs the IPA 'DPM Open Port' sequence that binds the
+    hardware TX/RX endpoints — the step the bare WDS requests were missing.
+    Packages live across the base/packages/luci feeds, so the index is merged.
+    """
+    status = root / 'usr/lib/opkg/status'
+    old = list(package_fields(status.read_text()))
+    installed = {p['Package']: p for p in old}
+    index = {}
+    for base in PKG_REPOS.values():
+        text = gzip.decompress(fetch(base + 'Packages.gz')).decode()
+        for p in package_fields(text):
+            index.setdefault(p['Package'], dict(p, _base=base))
+    requested = ['modemmanager', 'luci-proto-modemmanager']
+    added, visiting = {}, set()
+
+    def install(name):
+        if name in installed or name in added:
+            return
+        if name in visiting:
+            raise ValueError(f'Dependency cycle {name}')
+        if name.startswith('kmod-') or name == 'kernel':
+            raise ValueError(f'Refusing foreign kernel dependency {name}')
+        if name not in index:
+            raise ValueError(f'Package not found in any feed: {name}')
+        visiting.add(name)
+        info = index[name]
+        base = info['_base']
+        for dep in info.get('Depends', '').split(','):
+            if not dep.strip():
+                continue
+            if '|' in dep:
+                raise ValueError(f'Unsupported alternative {dep}')
+            dep_name = dep.strip().split()[0]
+            install(dep_name)
+            exact = re.search(r'\(=\s*([^ )]+)\)', dep)
+            actual = (installed.get(dep_name) or added[dep_name])['Version']
+            if exact and exact.group(1) != actual:
+                raise ValueError(f'Version mismatch {dep_name}: {actual} != {exact.group(1)}')
+        payload = fetch(base + info['Filename'])
+        if digest(payload) != info['SHA256sum']:
+            raise ValueError(f'Package checksum failed: {name}')
+        with tarfile.open(fileobj=io.BytesIO(payload), mode='r:*') as ipk:
+            m = next(m for m in ipk.getmembers() if m.name.removeprefix('./').startswith('data.tar.'))
+            member_file = ipk.extractfile(m)
+            if member_file is None:
+                raise ValueError(f'Invalid data member in {name}')
+            data = member_file.read()
+        with tarfile.open(fileobj=io.BytesIO(data), mode='r:*') as archive:
+            archive.extractall(root, filter='tar')
+        added[name] = dict(info, Status='install ok installed')
+        info_dir = root / 'usr/lib/opkg/info'
+        (info_dir / (name + '.list')).write_text('\n'.join('/' + m.name.removeprefix('./') for m in tarfile.open(fileobj=io.BytesIO(data)).getmembers()) + '\n')
+        visiting.remove(name)
+
+    for name in requested:
+        install(name)
+    keep = [p for p in old if p['Package'] != 'kernel' and not p['Package'].startswith('kmod-')]
+    status.write_text('\n\n'.join('\n'.join(f'{k}: {v}' for k, v in p.items()) for p in keep + list(added.values())) + '\n\n')
+    return [{k: p[k] for k in ('Package', 'Version', 'Filename', 'SHA256sum')} for p in added.values()]
+
+
 def copy(repo, root, source, target, executable=True):
     path = root / target
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -265,6 +345,7 @@ def main():
     # Do not configure an open AP or generate placeholder calibration/MAC data.
     subprocess.run(['sh', str(repo / 'scripts/stage-wifi-fw.sh'), str(repo / 'modem-firmware'), str(root)], check=True)
     packages = install_wifi(root)
+    packages += install_modem(root)
     for svc in ('wpad',):
         link = root / f'etc/rc.d/S19{svc}'
         if not link.exists() and not link.is_symlink():
