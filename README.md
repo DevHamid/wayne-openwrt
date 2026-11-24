@@ -6,6 +6,20 @@
 
 ## Current status (updated 2026-11-24)
 
+- **2026-11-24 (night) — clean-install failure root-caused: overlay inits were present but never ENABLED.**
+  A fresh install of the ModemManager ROM booted (ramdisk `/init` built the USB gadget) but the
+  AP userspace died: no SSH, no ECM carrier, silent console. Root cause: the assembler copied
+  `etc/init.d/diag-reader` into the rootfs but **no `/etc/rc.d/S99diag-reader` enable symlink** —
+  on the earlier in-place install the link already existed on the live root, masking the gap.
+  Without the reader the modem starves and takes the AP down with it. Fixes:
+  assembler now creates the rc.d enable links (`S99diag-reader`, `S95modemmanager`) and CI asserts
+  both in the packaged rootfs (commit `7feb9db`, build 45505540500 green); the release asset was
+  replaced with the corrected zip (sha `21927461…`). On-device recovery (symlink via recovery adb)
+  is prepared as `~/wayne-staging/fix-rcd.sh` on the bridge; the test phone still needs a power
+  cycle/recovery to become reachable again.
+
+## Current status (updated 2026-11-24)
+
 - **2026-11-24 (late) — ModemManager ROM built and released; on-device install in progress, installer rewritten for the live-root layout.**
   The 24.10 ROM now ships **ModemManager + `luci-proto-modemmanager`** (LuCI page) on top of the
   diag-reader fix; released as **`m9-2410-modemmanager-48e7bbc`** (rom zip sha
