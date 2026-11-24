@@ -163,7 +163,7 @@ jobs:
           T=build/rom/system/rootfs.tar.gz
           tar -tzf "$T" > build/rom-rootfs.list
           for entry in ./sbin/init ./usr/lib/wayne/usb-gadget.sh ./root/screen.sh ./usr/sbin/wayne-ota \
-                       ./etc/rc.d/S99burnin-guard ./lib/firmware/wlan/qca_cld/wlanmdsp.mbn \
+                       ./etc/rc.d/S99burnin-guard ./etc/init.d/diag-reader ./lib/firmware/wlan/qca_cld/wlanmdsp.mbn \
                        ./lib/firmware/modem.mdt ./lib/firmware/mba.mbn; do
             grep -Fxq "$entry" build/rom-rootfs.list || { echo "::error::rootfs missing $entry"; exit 1; }
           done

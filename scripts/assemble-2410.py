@@ -295,6 +295,11 @@ def main():
         ('overlay-openwrt/usr/sbin/wayne-ota', 'usr/sbin/wayne-ota'),
         ('scripts/screen.sh', 'root/screen.sh'),
         ('overlay-openwrt/etc/init.d/burnin-guard', 'etc/init.d/burnin-guard'),
+        # The modem's diag task starves (dog_hb "Task starvation: diag" ->
+        # ERR_FATAL) when nothing on the AP holds /dev/diag open. Stock
+        # Android keeps qcrild on it all boot; this init service does the
+        # same job on OpenWrt. Must be in every ROM.
+        ('overlay-openwrt/etc/init.d/diag-reader', 'etc/init.d/diag-reader'),
         ('modem/rmtfs', 'etc/init.d/rmtfs'),
         ('scripts/modem-boot-trigger.init', 'etc/init.d/modem-boot-trigger'),
         ('overlay-openwrt/etc/uci-defaults/90-usb0-lan', 'etc/uci-defaults/90-usb0-lan'),
