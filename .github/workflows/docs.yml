@@ -87,7 +87,11 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add docs/diagrams
           git diff --staged --quiet || git commit -m "docs: regenerate diagrams [skip ci]"
-          git push origin "HEAD:main"
+          for attempt in 1 2 3; do
+            git push origin "HEAD:main" && break
+            echo "push rejected (concurrent commit), rebasing attempt $attempt"
+            git pull --rebase --autostash origin main
+          done
 
   changelog:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -95,11 +99,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: main          # work on main: the tag is a trigger, not the tree
           fetch-depth: 0
 
       - name: generate release notes
         run: |
-          BASE=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          # Release base = previous vX.Y.Z tag. Plain `git describe` picks any tag,
+          # and this repo also carries branch-pin tags (m9-2410-modemmanager-*),
+          # which produced notes covering the wrong range.
+          BASE=$(git describe --tags --abbrev=0 --match 'v[0-9]*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)
           echo "base=${BASE:-<initial>} head=${GITHUB_REF_NAME}"
           python3 .github/scripts/changelog_local.py --git . \
             ${BASE:+--from "$BASE"} --to "$GITHUB_REF_NAME" \
@@ -122,10 +130,13 @@ jobs:
             || gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
 
       - name: commit CHANGELOG back
-        if: github.ref == 'refs/heads/main'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add CHANGELOG.md
           git diff --staged --quiet || git commit -m "docs: changelog ${GITHUB_REF_NAME} [skip ci]"
-          git push origin "HEAD:main"
+          for attempt in 1 2 3; do
+            git push origin "HEAD:main" && break
+            echo "push rejected (concurrent commit), rebasing attempt $attempt"
+            git pull --rebase --autostash origin main
+          done

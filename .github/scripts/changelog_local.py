@@ -205,6 +205,10 @@ def main() -> None:
                     help="omit Revert/Reapply commits (a revert+reapply pair cancels out)")
     ap.add_argument("--kernel-sections", action="store_true",
                     help="treat 'mm: ...', 'ext4: ...' prefixes as kernel subsystems, not types")
+    ap.add_argument("--exclude-authors", default=r"\[bot\]$",
+                    help="regex of author names to drop (default: bot accounts)")
+    ap.add_argument("--keep-skip-ci", action="store_true",
+                    help="keep commits whose subject carries [skip ci] (dropped by default)")
     ap.add_argument("--no-contributors", action="store_true", help="drop the Contributors section")
     ap.add_argument("--out", default="-")
     a = ap.parse_args()
@@ -218,6 +222,16 @@ def main() -> None:
     rng = [f"{a.frm}..{a.to}"] if a.frm else []
     raw = log(a.git, rng)
     commits = [classify(c, legacy, fallback, a.kernel_sections) for c in raw]
+    drops = []
+    if not a.keep_skip_ci:
+        drops += [c for c in commits if "[skip ci]" in c["subject"].lower()]
+        commits = [c for c in commits if "[skip ci]" not in c["subject"].lower()]
+    if a.exclude_authors:
+        pat = re.compile(a.exclude_authors)
+        drops += [c for c in commits if pat.search(c.get("author") or "")]
+        commits = [c for c in commits if not pat.search(c.get("author") or "")]
+    if drops:
+        print(f"noise: dropped {len(drops)} commits (bot / [skip ci])", file=sys.stderr)
     if a.drop_reverts:
         dropped = [c for c in commits if c["type"] == "revert"]
         commits = [c for c in commits if c["type"] != "revert"]
