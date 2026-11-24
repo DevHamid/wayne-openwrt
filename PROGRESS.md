@@ -26,6 +26,19 @@ network** — the hard part is behind us.
 
 ---
 
+## 🆕 Latest update (late Nov 24, #2)
+
+- The corrected ROM is **built, verified and published** (release
+  `m9-2410-modemmanager-48e7bbc`, build 45505540500): ModemManager + modem web page +
+  the modem-stability fix, with a new CI check that **fails the build** if the fix isn't
+  enabled in the packaged image.
+- A real device lesson from today's install: a freshly installed image had the fix *present*
+  but not *enabled* (a missing boot symlink), which kept the modem from staying up. Caught,
+  root-caused and fixed at the build level — plus a one-line on-device fix for the current unit.
+- The test phone is currently unresponsive (a previous install wedged it; it's in a state where
+  only a power cycle/recovery brings it back). The user has been pinged; the moment it's back,
+  the verified installer runs automatically from the bridge.
+
 ## 🆕 Latest update (late Nov 24)
 
 - The modem software suite (**ModemManager** + a modem page in the router web UI) is **built into
