@@ -333,10 +333,16 @@ def main():
     for up in ('MBA.MBN', 'MODEM.MDT'):
         if (fw / up).is_file():
             shutil.copyfile(fw / up, fw / up.lower())
-    for name, order in [('qrtr-ns', 11), ('usb-gadget', 95), ('rmtfs', 95),
-                        ('wayne-wlan-fw', 95), ('pd-mapper', 96), ('tqftpserv', 96),
+    # Service order must match each init script's own START= value: procd runs
+    # /etc/rc.d/S<NN><name> in NN order, so a wrong NN silently changes ordering.
+    # dbus MUST come up before modemmanager (MM speaks to the system bus), and
+    # diag-reader must start BEFORE modem-boot-trigger (97) so /dev/diag is
+    # already being drained when the modem comes online.
+    for name, order in [('qrtr-ns', 11), ('dbus', 60), ('modemmanager', 70),
+                        ('usb-gadget', 95), ('rmtfs', 95), ('wayne-wlan-fw', 95),
+                        ('pd-mapper', 96), ('tqftpserv', 96),
                         ('modem-boot-trigger', 97), ('wayne-wlan', 99),
-                        ('burnin-guard', 99), ('diag-reader', 99), ('modemmanager', 95)]:
+                        ('burnin-guard', 99), ('diag-reader', 25)]:
         link = root / f'etc/rc.d/S{order}{name}'
         link.unlink(missing_ok=True)
         link.symlink_to('../init.d/' + name)
