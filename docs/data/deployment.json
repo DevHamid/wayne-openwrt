@@ -1,0 +1,81 @@
+{
+  "title": "wayne OpenWrt deployment",
+  "subtitle": "where each artifact runs: eMMC partitions on the phone, services over the USB-ECM link, host LAN",
+  "slug": "deploy",
+  "width": 960,
+  "height": 560,
+  "zones": [
+    { "id": "phone", "label": "phone · sdm660 (wayne)", "x": 24, "y": 116, "w": 568, "h": 336 },
+    { "id": "host", "label": "host LAN · 100.86.22.114", "x": 672, "y": 116, "w": 264, "h": 336 }
+  ],
+  "nodes": [
+    {
+      "id": "boot", "zone": "phone", "x": 48, "y": 148, "w": 200, "h": 116, "tag": "PART", "name": "boot · p58",
+      "artifacts": [
+        { "name": "kernel", "version": "4.19.325" },
+        { "name": "bootstrap", "version": "32 MiB cap" }
+      ]
+    },
+    {
+      "id": "system", "zone": "phone", "x": 368, "y": 148, "w": 200, "h": 116, "tag": "PART", "name": "system · p64",
+      "artifacts": [
+        { "name": "OpenWrt rootfs", "version": "24.10.4" },
+        { "name": "usb0", "version": "192.168.1.1/24" }
+      ]
+    },
+    {
+      "id": "userdata", "zone": "phone", "x": 48, "y": 300, "w": 200, "h": 88, "tag": "PART", "name": "userdata",
+      "artifacts": [
+        { "name": "config overlay", "version": "persistent" }
+      ]
+    },
+    {
+      "id": "modem", "zone": "phone", "x": 368, "y": 300, "w": 200, "h": 88, "tag": "HOST", "name": "modem + persist",
+      "accent": true,
+      "artifacts": [
+        { "name": "NON-HLOS", "version": "read-only" }
+      ]
+    },
+    {
+      "id": "pc", "zone": "host", "x": 696, "y": 148, "w": 216, "h": 116, "tag": "VM", "name": "bridge PC",
+      "artifacts": [
+        { "name": "build tree", "version": "24.10.4" },
+        { "name": "fastboot", "version": "flash lane" }
+      ]
+    },
+    {
+      "id": "router", "zone": "host", "x": 696, "y": 300, "w": 216, "h": 88, "tag": "NET", "name": "upstream router",
+      "artifacts": [
+        { "name": "WAN uplink", "version": "192.168.1.0/24" }
+      ]
+    }
+  ],
+  "paths": [
+    {
+      "from": "boot", "to": "system", "label": "mount + switch_root", "kind": "accent",
+      "points": [[248, 206], [368, 206]], "label_at": [308, 176]
+    },
+    {
+      "from": "system", "to": "userdata", "label": "overlay · config", "kind": "muted",
+      "points": [[468, 264], [468, 284], [148, 284], [148, 300]]
+    },
+    {
+      "from": "system", "to": "modem", "label": "PIL · QRTR:IPA", "kind": "muted", "dash": true,
+      "points": [[468, 264], [468, 300]], "label_at": [540, 284]
+    },
+    {
+      "from": "system", "to": "pc", "label": "USB ECM", "kind": "link",
+      "points": [[568, 220], [696, 220]]
+    },
+    {
+      "from": "pc", "to": "router", "label": "NAT", "kind": "muted",
+      "points": [[804, 264], [804, 300]]
+    }
+  ],
+  "legend": [
+    { "swatch": "chip", "label": "artifact + version" },
+    { "swatch": "link-line", "label": "crosses a boundary" },
+    { "swatch": "muted-line", "label": "stays in one zone" },
+    { "swatch": "accent-line", "label": "current blocker" }
+  ]
+}

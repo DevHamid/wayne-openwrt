@@ -125,7 +125,22 @@ OrangeFox/TWRP recovery zip
 
 ## Roadmap (interactive blueprint)
 
-![Wayne roadmap board](docs/diagrams/roadmap.svg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/roadmap-dark.svg">
+  <img src="docs/diagrams/roadmap.svg" width="960" alt="Roadmap board: 9 milestones closed, M8 active, Wi-Fi blocked at PHY detection, 4 queued">
+</picture>
+
+Activity and tagged builds are rendered from this repo's own history by `.github/workflows/docs.yml` — same source of truth, no hand-maintained numbers:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/activity-dark.svg">
+  <img src="docs/diagrams/activity.svg" width="960" alt="Commit activity per day over the last 26 weeks">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/timeline-dark.svg">
+  <img src="docs/diagrams/timeline.svg" width="960" alt="Release milestones from v0.9.12 to v0.9.16">
+</picture>
 
 **Overall state:** M1–M7 closed; M8 active; M9 structure frozen but runtime handoff still pending.
 
@@ -219,6 +234,16 @@ YOU ARE HERE
 The full-initramfs image follows the same userspace after unpacking, but it
 does **not** exercise the product's system-partition handoff and is therefore
 only a test/control image.
+
+Where each artifact actually runs — partitions, versions, and the two links that
+matter (the `switch_root` handoff and the USB-ECM management path):
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/deploy-dark.svg">
+  <img src="docs/diagrams/deploy.svg" width="960" alt="Deployment: kernel and bootstrap on boot p58, OpenWrt rootfs on system p64, config on userdata, modem read-only, bridge PC and upstream router over USB ECM">
+</picture>
+
+Author the source, not the picture: `docs/data/deployment.json`.
 
 Two boot images are produced per build:
 
