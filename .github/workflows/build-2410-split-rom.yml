@@ -163,7 +163,7 @@ jobs:
           T=build/rom/system/rootfs.tar.gz
           tar -tzf "$T" > build/rom-rootfs.list
           for entry in ./sbin/init ./usr/lib/wayne/usb-gadget.sh ./root/screen.sh ./usr/sbin/wayne-ota \
-                       ./etc/rc.d/S99burnin-guard ./etc/rc.d/S99diag-reader ./etc/init.d/diag-reader ./etc/rc.d/S95modemmanager ./lib/firmware/wlan/qca_cld/wlanmdsp.mbn \
+                       ./etc/rc.d/S99burnin-guard ./etc/rc.d/S25diag-reader ./etc/rc.d/S60dbus ./etc/rc.d/S70modemmanager ./etc/init.d/diag-reader ./lib/firmware/wlan/qca_cld/wlanmdsp.mbn ./usr/sbin/ModemManager ./www/luci-static/resources/view/modemmanager/status.js \
                        ./lib/firmware/modem.mdt ./lib/firmware/mba.mbn; do
             grep -Fxq "$entry" build/rom-rootfs.list || { echo "::error::rootfs missing $entry"; exit 1; }
           done
