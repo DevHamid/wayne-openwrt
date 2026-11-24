@@ -139,6 +139,27 @@ fi
 
 echo "bootstrap: system mounted; /sbin/init present" > /dev/console
 
+# --- 3d. Confirm the composite gadget actually bound before we hand over ----
+# The gadget is built above in a BACKGROUND subshell. switch_root replaces
+# PID 1, and if the binder has not written the UDC yet it is killed mid-build --
+# leaving the host with a gadget that enumerates but never configures (no
+# ttyGS0 getty, no usb0 carrier). Wait, bounded, for the UDC to reach
+# 'configured' before the handoff so the management link survives.
+if [ -r /usb-gadget.sh ]; then
+    gwait=0; bound=no
+    while [ "$gwait" -lt 15 ]; do
+        for u in /sys/class/udc/*; do
+            [ -e "$u" ] || continue
+            case "$(cat "$u/state" 2>/dev/null)" in
+                *configured*) bound=yes ;;
+            esac
+        done
+        [ "$bound" = yes ] && break
+        sleep 1; gwait=$((gwait+1))
+    done
+    echo "bootstrap: gadget bound=$bound after ${gwait}s" > /dev/console
+fi
+
 # --- 4. Hand off (mount --move + switch_root, same as installer) -----------
 mkdir -p "$MNT/dev" "$MNT/proc" "$MNT/sys" "$MNT/tmp"
 mount --move /dev  "$MNT/dev"   2>/dev/null || bootstrap_fatal "move /dev failed"

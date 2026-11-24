@@ -48,6 +48,19 @@ ensure_usb0_uci() {
     /etc/init.d/dropbear restart 2>/dev/null
 }
 
+# True when a UDC exists but still reads "not attached" after the gadget
+# should have been built and bound. Catches the bring-up race where the
+# initial binder lost the UDC write (e.g. killed at switch_root) or a stale
+# bind left the pull-up off. A properly bound+configured UDC never reads
+# "not attached", and no UDC at all returns 1 (nothing to rebuild).
+udc_needs_rebuild() {
+    for u in /sys/class/udc/*; do
+        [ -e "$u" ] || continue
+        [ "$(cat "$u/state" 2>/dev/null)" = "not attached" ] && return 0
+    done
+    return 1
+}
+
 start_service() {
     # The gadget builder lives either at /usr/lib/wayne/usb-gadget.sh
     # (persistent layout) or at /usb-gadget.sh (initramfs/legacy layout).
@@ -59,6 +72,12 @@ start_service() {
     fi
     type usb_gadget_up >/dev/null 2>&1 || { logger -t usb-gadget "usb_gadget_up not found"; return 0; }
     usb_gadget_up
+    # Harden against the attach race: if the UDC never left "not attached",
+    # rebuild the gadget exactly once before giving up (idempotent helper).
+    if udc_needs_rebuild; then
+        logger -t usb-gadget "UDC 'not attached' after build; rebuilding gadget once"
+        usb_gadget_up
+    fi
     [ -e /sys/class/net/usb0 ] || return 0
 
     ip link set usb0 up 2>/dev/null

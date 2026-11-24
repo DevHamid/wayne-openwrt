@@ -56,10 +56,29 @@ jobs:
           test -n "$KERNEL"
           echo "KERNEL=$KERNEL" >> "$GITHUB_ENV"
 
+      - name: Check kernel gates (QRTR registry)
+        run: |
+          set -euo pipefail
+          # build/kernel-source.txt rides inside the reused artifact and carries
+          # the value the build job's own capability step recorded -- the same
+          # file the release job refuses on. Surface it here so a registry-less
+          # kernel fails before assembly instead of after a full ROM build.
+          # NB: find -print -quit, never `find | head`: under pipefail head's
+          # early exit SIGPIPEs find and the pipeline reports a false failure.
+          KS="$(find source -name kernel-source.txt -print -quit)"
+          [ -n "$KS" ] || { echo "::error::kernel-source.txt missing from the source artifact"; exit 1; }
+          cat "$KS"
+          if ! grep -qx 'qrtr_registry=present' "$KS"; then
+            echo "::error::source kernel has no in-kernel QRTR service registry; the ~42 s modem ERR_FATAL fix would regress. Re-dispatch with a registry-bearing source_run."
+            exit 1
+          fi
+          echo 'PASS: QRTR service registry present in the reused kernel'
+
       - name: Test assembly helpers
         run: |
           python3 scripts/test-2410.py -v
           sh scripts/test-ota.sh
+          sh scripts/test-usb-gadget-bringup.sh
 
       - name: Assemble ImmortalWrt 24.10.4 system rootfs
         run: |
@@ -126,7 +145,9 @@ jobs:
             build/bootstrap-initramfs.cpio.gz build/rom-boot.img
           python3 scripts/check-pack.py mkboot donor-boot.img "$KERNEL" \
             build/bootstrap-initramfs.cpio.gz
-          test "$(stat -c%s build/rom-boot.img)" -lt 33554432
+          BOOT_SZ=$(stat -c%s build/rom-boot.img)
+          echo "boot-size gate: rom-boot.img=$BOOT_SZ bytes (ceiling 33554432)"
+          test "$BOOT_SZ" -lt 33554432
 
       - name: Assemble flashable ROM zip
         run: |
