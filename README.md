@@ -4,7 +4,28 @@
 
 **Vision / definition of done:** phone = pocket modem + services box, finished entirely on vendor kernel 4.19 + ImmortalWrt **24.10** (OpenWrt fork). **The finish line = a flashable OpenWrt ROM installable from TWRP/OrangeFox (recovery zip) — no PC, no fastboot.** Mainline kernel + OpenWrt 25/newest are a *future* track after v1.0 (mainline still buggy: partial modem, broken power management — moving now would break more than it fixes).
 
-## Current status (updated 2026-11-23)
+## Current status (updated 2026-11-24)
+
+- **2026-11-24 — modem diag-starvation root-caused (kernel exonerated) and fixed; modem now stable AND registered.**
+  The remaining `dog_hb.c:266 Task starvation: diag` loop was **not** a kernel problem. A side-by-side
+  comparison of a working (Android) unit and the OpenWrt unit showed identical kernel configs, diag
+  kernel threads, rpmsg/glink channels and device tree — and the clean `adios-wayne` kernel
+  crash-loops on OpenWrt while the same kernel family runs fine on Android. Root cause:
+  **nothing on OpenWrt reads `/dev/diag`**, so the modem's diagnostic stream backlogs until the
+  modem watchdog kills it (on stock Android `qcrild` holds `/dev/diag` open for the whole boot).
+  Separately: AP-initiated glink channel opens for DIAG make the modem assert
+  `glink_channel_migration.c:602` — **do not retry client-open**.
+  **Fix (verified on device):** flash the clean **`adios-wayne`** kernel (CI run #205, sha `626586ed…`)
+  and add a persistent `/dev/diag` reader as a boot service —
+  `overlay-openwrt/etc/init.d/diag-reader`, commit `014b0572`. Result: **35+ min stable, 0 fatals,
+  0 starvation**, and the modem is **registered** (`reg_state=2`, `ps=serving`). A dependency-free
+  QMI-over-QRTR probe (`scripts`/`qmi-probe.c`) reads IMEI, capabilities and registration straight
+  from OpenWrt. Gotchas recorded: QRTR ctrl types are `NEW_SERVER=4`/`NEW_LOOKUP=10`, and the
+  modem's QMI services sit on **node 0** (AP = node 1) with ports that change per boot.
+  **Next:** ModemManager (**`qcom-soc`** plugin: QMI over QRTR + IPA "DPM Open Port") is being
+  assembled into the 24.10 ROM (`a4546f5b`) to bring up the LTE data call and the LuCI modem page.
+  **ImmortalWrt 24.10 is the mandatory baseline** — the assembler now asserts it and refuses a
+  21.02-era build (operator directive).
 
 - **2026-11-23 — 24.10 promoted to the main flashable ROM; a second bootstrap defect (PID 1) found and fixed.**
   ImmortalWrt **24.10.4** is now the production line. The 24.10 rootfs gained the full radio stack
