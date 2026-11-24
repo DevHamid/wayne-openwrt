@@ -6,6 +6,26 @@
 
 ## Current status (updated 2026-11-24)
 
+- **2026-11-24 (late) — ModemManager ROM built and released; on-device install in progress, installer rewritten for the live-root layout.**
+  The 24.10 ROM now ships **ModemManager + `luci-proto-modemmanager`** (LuCI page) on top of the
+  diag-reader fix; released as **`m9-2410-modemmanager-48e7bbc`** (rom zip sha
+  `e50381cf…`, 2107 rootfs members, contrast-checked roadmap SVG + `docs.yml` CI added).
+  Two device lessons landed the same day:
+  1. **The running root IS the system partition** (`/dev/mmcblk0p61` mounted at `/`), so a
+     recovery-style reformat of the live root is impossible. `scripts/install-rom.sh` v2 now
+     extracts the new rootfs to tmpfs, verifies the modem pieces, backs up `/etc/config`,
+     tar-overlays the new rootfs over the live root, restores config, flashes boot (hash-verified)
+     and reboots. Committed as `0bd1a18`.
+  2. **The packaged rootfs was missing `etc/init.d/diag-reader`** — the fix would not have survived
+     a fresh install. The assembler now copies it into every rootfs and CI asserts its presence
+     (commit `2e227fa`, rebuild run 45488900153 green).
+  The first v2 install applied cleanly (new rootfs verified in place, boot flashed and
+  hash-matched) but the phone did not come back on the USB-ECM link after the install reboot —
+  the AP stopped answering (stale USB enumeration, no new device number), most likely a reboot
+  that never completed. Recovery is running autonomously: a bridge-side watcher re-installs the
+  corrected ROM (with diag-reader in the rootfs) as soon as the phone reappears; a power cycle
+  also works. **Nothing outside boot/system was touched.**
+
 - **2026-11-24 — modem diag-starvation root-caused (kernel exonerated) and fixed; modem now stable AND registered.**
   The remaining `dog_hb.c:266 Task starvation: diag` loop was **not** a kernel problem. A side-by-side
   comparison of a working (Android) unit and the OpenWrt unit showed identical kernel configs, diag
