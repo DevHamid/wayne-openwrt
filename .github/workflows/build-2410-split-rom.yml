@@ -60,6 +60,7 @@ jobs:
         run: |
           python3 scripts/test-2410.py -v
           sh scripts/test-ota.sh
+          sh scripts/test-usb-gadget-bringup.sh
 
       - name: Assemble ImmortalWrt 24.10.4 system rootfs
         run: |
