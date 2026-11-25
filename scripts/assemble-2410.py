@@ -248,7 +248,11 @@ def main():
     for up in ('MBA.MBN', 'MODEM.MDT'):
         if (fw / up).is_file():
             shutil.copyfile(fw / up, fw / up.lower())
-    for name, order in [('qrtr-ns', 11), ('usb-gadget', 95), ('rmtfs', 95),
+    # BASELINE (fix/baseline-qrtr-off): qrtr-ns NOT started at boot — the
+    # boot-time nameservice wedges the device pre-userspace when the modem
+    # is not yet online (wedge root cause, Build A proved it). The init.d
+    # script is still shipped for manual/diagnostic start.
+    for name, order in [('usb-gadget', 95), ('rmtfs', 95),
                         ('wayne-wlan-fw', 95), ('pd-mapper', 96), ('tqftpserv', 96),
                         ('modem-boot-trigger', 97), ('wayne-wlan', 99),
                         ('burnin-guard', 99)]:
