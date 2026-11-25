@@ -176,7 +176,7 @@ def install_modem(root):
         text = gzip.decompress(fetch(base + 'Packages.gz')).decode()
         for p in package_fields(text):
             index.setdefault(p['Package'], dict(p, _base=base))
-    requested = ['modemmanager', 'luci-proto-modemmanager', 'qmicli', 'qrtr-ns']
+    requested = ['modemmanager', 'luci-proto-modemmanager', 'qmi-utils']
     added, visiting = {}, set()
 
     def install(name):
