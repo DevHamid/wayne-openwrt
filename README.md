@@ -4,6 +4,23 @@
 
 **Vision / definition of done:** phone = pocket modem + services box, finished entirely on vendor kernel 4.19 + ImmortalWrt **24.10** (OpenWrt fork). **The finish line = a flashable OpenWrt ROM installable from TWRP/OrangeFox (recovery zip) — no PC, no fastboot.** Mainline kernel + OpenWrt 25/newest are a *future* track after v1.0 (mainline still buggy: partial modem, broken power management — moving now would break more than it fixes).
 
+## Current status (updated 2026-11-25)
+
+- **2026-11-25 — the "USB bug" (90-second AP death) is FIXED at the source.** The recurring
+  kernel panic was `smsm` (shared-memory state driver) blindly writing state into a **disabled**
+  SMSM host; on this device the audio DSP host is not enabled, so every round the AP wrote
+  SMSM_STATE into it and died ~90 s after boot (taking SSH/USB-ECM/picocom with it — exactly the
+  user-visible symptom). Fix (commit `4503a1c7`): the smsm probe/IRQ handler now refuses to update
+  or write a host whose `enabled` bit is clear, plus defensive NULL-op handling. Result on the
+  device: **uptime > 25 min with zero `Fatal error on the modem` and zero `Task starvation`
+  events**, diag-reader alive, USB-ECM carrier up the whole time — previous builds died at ~90 s.
+  This unblocked everything: MM 1.22 + dbus are running, SIM identity reads back (IMEI/IMSI/ICCID),
+  the modem is **registered** (CS=serving, PS=serving). Remaining gap: WDS `Start Network` still
+  returns QMI error 70 (InvalidOperation) — the IPA mux-bind gate (WDS `Bind Mux Data Port`,
+  0x00A2) currently rejects our request (`err 3`), so the data call needs netmgrd/ipacm or the
+  right endpoint TLVs; probing continues with `tools/wayne-data.c` (QMI-over-QRTR WDS/WDA driver,
+  committed). Corrected ROM built (CI `45515123544` green); OrangeFox recovery is the install path.
+
 ## Current status (updated 2026-11-24)
 
 - **2026-11-24 (night) — clean-install failure root-caused: overlay inits were present but never ENABLED.**
