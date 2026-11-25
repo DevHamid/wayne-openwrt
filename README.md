@@ -15,11 +15,16 @@
   device: **uptime > 25 min with zero `Fatal error on the modem` and zero `Task starvation`
   events**, diag-reader alive, USB-ECM carrier up the whole time — previous builds died at ~90 s.
   This unblocked everything: MM 1.22 + dbus are running, SIM identity reads back (IMEI/IMSI/ICCID),
-  the modem is **registered** (CS=serving, PS=serving). Remaining gap: WDS `Start Network` still
-  returns QMI error 70 (InvalidOperation) — the IPA mux-bind gate (WDS `Bind Mux Data Port`,
-  0x00A2) currently rejects our request (`err 3`), so the data call needs netmgrd/ipacm or the
-  right endpoint TLVs; probing continues with `tools/wayne-data.c` (QMI-over-QRTR WDS/WDA driver,
-  committed). Corrected ROM built (CI `45515123544` green); OrangeFox recovery is the install path.
+  the modem is **registered** (CS=serving, PS=serving). Remaining gap: **MM cannot create the
+  modem object** — the `qcom-soc` plugin aborts with `Failed to find a net port in the QMI modem`.
+  Stock MM 1.22 has no IPA netdev support (no `ipa` strings in the binary) and `rmnet_ipa0` is a
+  virtual netdev with no parent QMI device, so MM has nothing to grab; and without a net port the
+  plugin never runs its DPM `Open Port` step, which is what actually binds the IPA TX/RX endpoints
+  (that is also why raw WDS `Start Network` returns QMI error 70 / InvalidOperation, and WDS
+  `Bind Mux Data Port` returns err 3). Next: teach MM the IPA endpoint (patch the `qcom-soc`
+  plugin to accept `rmnet_ipa0` + run DPM Open Port), or replicate that DPM open sequence from
+  `tools/wayne-data.c`. ROM now ships `qmi-utils` (qmicli + qrtr-ns) for client-side debugging
+  (CI `45517551850` green); OrangeFox recovery is the install path.
 
 ## Current status (updated 2026-11-24)
 
