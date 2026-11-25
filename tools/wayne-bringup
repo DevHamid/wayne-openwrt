@@ -1,0 +1,12 @@
+#!/bin/sh
+# QMI-over-QRTR data-call bring-up probe for the wayne (sdm660) built-in modem.
+# Complements ModemManager: MM cannot yet bind the IPA netdev, so we drive
+# WDS/WDA directly. Requires: kmod-qrtr + running qrtr-ns + booted modem.
+[ -d /sys/class/qrtr ] || { echo "no qrtr subsystem"; exit 1; }
+pgrep -x qrtr-ns >/dev/null || /etc/init.d/qrtr-ns start
+case "$1" in
+  list|sim|reg|dbg) exec /usr/bin/qmi-probe "$@" ;;
+  fmt|bind|start|stop|settings) exec /usr/bin/wayne-data "$@" ;;
+  raw) exec /usr/bin/qmi-probe "$@" ;;
+  *) echo "usage: $0 {list|sim|reg|fmt|bind <mux>|start <apn> <prof>|stop|settings|raw <svc> <msg>}" ;;
+esac
