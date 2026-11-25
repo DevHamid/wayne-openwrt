@@ -209,7 +209,10 @@ jobs:
           cp ../../scripts/wifi-diag.sh root/wifi-diag.sh
           chmod +x etc/init.d/pd-mapper etc/init.d/tqftpserv etc/init.d/qrtr-ns \
                    etc/init.d/wayne-wlan-fw etc/init.d/wayne-wlan root/wifi-diag.sh
-          ln -sf ../init.d/qrtr-ns etc/rc.d/S11qrtr-ns
+          # BASELINE TEST (fix/baseline-qrtr-off): qrtr-ns NOT started at boot.
+          # S11qrtr-ns started the QRTR name service before the modem is online;
+          # prime suspect for the pre-userspace wedge. One variable vs v2 baseline.
+          # ln -sf ../init.d/qrtr-ns etc/rc.d/S11qrtr-ns
           ln -sf ../init.d/wayne-wlan-fw etc/rc.d/S95wayne-wlan-fw
           ln -sf ../init.d/pd-mapper etc/rc.d/S96pd-mapper
           ln -sf ../init.d/tqftpserv etc/rc.d/S96tqftpserv
