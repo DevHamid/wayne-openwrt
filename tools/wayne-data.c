@@ -1,4 +1,3 @@
-#include <stdint.h>
 /* wayne-data.c — minimal QMI-over-QRTR data-call bring-up for the wayne (sdm660) built-in modem.
  * Commands:
  *   bind <mux>          WDS Bind Mux Data Port (0x00A2)
@@ -7,12 +6,14 @@
  *   settings            WDS Get Current Settings (0x0024)
  *   fmt <ll>            WDA Set Data Format (0x0020)
  */
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <linux/qrtr.h>
 
 #define QRTR_TYPE_NEW_SERVER 4
@@ -22,13 +23,6 @@
 
 static int fd;
 static unsigned txn = 0;
-
-#define QRTR_TYPE_NEW_SERVER 4
-#define QRTR_TYPE_NEW_LOOKUP 10
-#define QMI_SVC_WDS 1
-#define QMI_SVC_WDA 26
-
-#define QRTR_PORT_CTRL (-2)
 
 struct qrtr_server {
     uint32_t service;
@@ -41,12 +35,23 @@ struct ctrl_pkt {
     struct qrtr_server server;
 };
 
+static void hexdump(const uint8_t *b, ssize_t n) {
+    for (ssize_t i = 0; i < n; i += 16) {
+        printf("   %04zx:", i);
+        for (ssize_t j = i; j < i + 16 && j < n; j++) printf(" %02x", b[j]);
+        printf("\n");
+    }
+}
+
 static int lookup_svc(unsigned id, int *node, int *port) {
-    struct sockaddr_qrtr sq = { .sq_family = AF_QIPCRTR, .sq_node = 0, .sq_port = QRTR_PORT_CTRL };
+    struct sockaddr_qrtr sq;
+    socklen_t sl = sizeof(sq);
     struct ctrl_pkt pkt;
     struct timeval tv = { .tv_sec = 3 };
-    socklen_t sl = sizeof(sq);
     if (getsockname(fd, (struct sockaddr *)&sq, &sl) < 0) return -1;
+    memset(&sq, 0, sizeof(sq));
+    sq.sq_family = AF_QIPCRTR;
+    sq.sq_node = 1;
     sq.sq_port = QRTR_PORT_CTRL;
     memset(&pkt, 0, sizeof(pkt));
     pkt.cmd = QRTR_TYPE_NEW_LOOKUP;
