@@ -4,7 +4,32 @@
 
 **Vision / definition of done:** phone = pocket modem + services box, finished entirely on vendor kernel 4.19 + ImmortalWrt **24.10** (OpenWrt fork). **The finish line = a flashable OpenWrt ROM installable from TWRP/OrangeFox (recovery zip) — no PC, no fastboot.** Mainline kernel + OpenWrt 25/newest are a *future* track after v1.0 (mainline still buggy: partial modem, broken power management — moving now would break more than it fixes).
 
-## Current status (updated 2026-11-25)
+## Current status (updated 2026-11-26)
+
+- **2026-11-26 — Wi-Fi blocker identified: a build-config artifact, not a modem bug. qcacld is linked into
+  vmlinux, so the shipped module can never load.** The trace kernel (`debug/wayne-icnss-handshake-v1`,
+  built 05:43 UTC) booted the 24.10.4 rootfs and produced the first complete WLFW trace:
+  `ARRIVE enter state=0x180` → `CONNECT rc=0 port=91` (`QMI Server Connected 0x980`) → `IND_REGISTER rc=0
+  valid=1` → `MSA_INFO rc=0` → `MSA_PERM rc=0` → `MSA_READY rc=0` (`0xd81`) → `CAP rc=0` (122 ms) →
+  `HW_POWER rc=0` → **`ARRIVE exit rc=0 state=0xd83`**. Every stage succeeds: the icnss handshake
+  hypothesis is closed, and no qrtr-ns / FW-ready gate sits in the failure path. On the same boot the real
+  blocker is explicit — `[0.499951] wlan: Loading driver v5.2.05.23C`,
+  `[0.500577] wlan_hdd_state wlan major(502) initialized`, then
+  `[123.637215] wlan: exports duplicate symbol __qdf_defer_func (owned by kernel)` on all 3 attempts.
+  `grep -w __qdf_defer_func /proc/kallsyms` returns `T` **with no module column** = vmlinux owns it. The
+  built-in driver also probed at 0.5 s, before the modem exists at 51 s, so its one-shot probe is lost and
+  cannot be re-run; the rootfs `wlan.ko` has matching vermagic but is rejected on the duplicate symbol.
+  `/sys/class/ieee80211/` and `iw dev` stay empty.
+  **Cause is a branch offset, not a Kconfig edit:** `debug/wayne-icnss-handshake-v1` is `behind_by: 10`
+  against `debug/wayne-wlan-sfr-v2` and carries `CONFIG_QCA_CLD_WLAN=y` (defconfig line 666); only sfr-v2
+  has `=m` plus the qdf initcall fixes (`ebe6f4b5f`, `933f59b31`, `46db4f390`) and `c1590db1f` merging the
+  icnss diagnostics onto the module base. **Fix built in CI:** `build.yml` on `main`,
+  `kernel_ref=debug/wayne-wlan-sfr-v2`, run **45796829337**. Board: `t_6d5ac1e6`.
+  Two evidence traps now recorded so they are not repeated: `/proc/config.gz` on this image is a foreign
+  blob (`CONFIG_LOCALVERSION="-perf"` while the running kernel is `-LKGeek-devhamid-remastered`) and claims
+  `# CONFIG_QCA_CLD_WLAN is not set` even though the driver is demonstrably built in — never cite it; and
+  `wlan-load.sh`'s readiness grep is a false negative on trace kernels (`icnss_fw_ready: no (60s)` while the
+  handshake had already completed, because it looks for `WLAN FW is ready` / `stage=FW_READY`).
 
 - **2026-11-25 — the "USB bug" (90-second AP death) is FIXED at the source.** The recurring
   kernel panic was `smsm` (shared-memory state driver) blindly writing state into a **disabled**
