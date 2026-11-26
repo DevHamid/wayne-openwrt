@@ -29,10 +29,14 @@ network** — the hardest modem work is behind us.
 ## 🆕 Latest update (Nov 26) — why Wi-Fi still refuses, and the real fix
 
 **Status: corrected CI build dispatched.** Build `45885729188` is running now, using
-`kernel_ref=debug/wayne-wlan-sfr-v2` (tip `f997eb3`) — the branch that ships the
-Wi-Fi driver as a loadable module while keeping the modem stability fixes. This is the
-build that should make Wi-Fi appear for the first time. Watch it at
+`kernel_ref=debug/wayne-wlan-sfr-v2` (tip `f997eb3`). Watch it at
 https://github.com/DevHamid/wayne-openwrt/actions/runs/45885729188.
+
+**Important distinction:** run `45796829337` did build `debug/wayne-wlan-sfr-v2` and produced
+`wlan.ko` as a module — but that was a test build, not the ROM that ships. The ROM that ships
+came from run `45857710376`, which used `fix/ipa-ssr-race-20261126` (card #2) instead of
+`debug/wayne-wlan-sfr-v2` (card #1). So the published ROM still has qcacld built-in (`=y`) and
+wlan.ko can never load. Build `45885729188` is the one that should ship the module-based ROM.
 
 For a while we believed Wi-Fi was stuck in the modem firmware: the theory was that the phone never
 handed the Wi-Fi service over to the system, and that a timing fix would unlock it.
