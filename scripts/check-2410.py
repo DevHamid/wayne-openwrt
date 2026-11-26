@@ -53,7 +53,9 @@ def check(image_path, source_kernel, expected_ujail=None, max_mib=32):
     assert b"option allow_boot '1'" in files['etc/config/wayne-modem'][1]
     assert 'etc/uci-defaults/11-anonmount' not in files, 'Internal RW automount default remains enabled'
     assert b"option anon_mount '0'" in files['etc/config/fstab'][1]
-    for svc, number in [('rmtfs', 95), ('usb-gadget', 95), ('modem-boot-trigger', 97), ('burnin-guard', 99), ('wpad', 19), ('qrtr-ns', 11), ('wayne-wlan-fw', 95), ('pd-mapper', 96), ('tqftpserv', 96), ('wayne-wlan', 99)]:
+    # qrtr-ns must NOT be auto-started (baseline fix: boot-time nameservice
+    # wedges pre-userspace); everything else must be linked.
+    for svc, number in [('rmtfs', 95), ('usb-gadget', 95), ('modem-boot-trigger', 97), ('burnin-guard', 99), ('wpad', 19), ('wayne-wlan-fw', 95), ('pd-mapper', 96), ('tqftpserv', 96), ('wayne-wlan', 99)]:
         mode, target = files[f'etc/rc.d/S{number}{svc}']
         assert stat.S_ISLNK(mode) and target == ('../init.d/' + svc).encode(), f'Bad service link {svc}'
     provenance = json.loads(files['etc/wayne-build.json'][1])
