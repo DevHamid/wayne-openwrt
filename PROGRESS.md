@@ -28,6 +28,12 @@ network** — the hardest modem work is behind us.
 
 ## 🆕 Latest update (Nov 26) — why Wi-Fi still refuses, and the real fix
 
+**Status: corrected CI build dispatched.** Build `45885729188` is running now, using
+`kernel_ref=debug/wayne-wlan-sfr-v2` (tip `f997eb3`) — the branch that ships the
+Wi-Fi driver as a loadable module while keeping the modem stability fixes. This is the
+build that should make Wi-Fi appear for the first time. Watch it at
+https://github.com/DevHamid/wayne-openwrt/actions/runs/45885729188.
+
 For a while we believed Wi-Fi was stuck in the modem firmware: the theory was that the phone never
 handed the Wi-Fi service over to the system, and that a timing fix would unlock it.
 
