@@ -28,8 +28,10 @@ network** — the hardest modem work is behind us.
 
 ## 🆕 Latest update (Nov 26) — why Wi-Fi still refuses, and the real fix
 
-**Status: corrected CI build dispatched.** Build `45885729188` is running now, using
-`kernel_ref=debug/wayne-wlan-sfr-v2` (tip `f997eb3`). Watch it at
+**Status: corrected CI build completed.** Build `45885729188` finished successfully, using
+`kernel_ref=debug/wayne-wlan-sfr-v2` (tip `f997eb3`). All artifacts built: wayne-openwrt-2410,
+wayne-openwrt-2305, wayne-openwrt. The 2410 rootfs now ships wlan.ko as a loadable module
+(CONFIG_QCA_CLD_WLAN=m). Watch it at
 https://github.com/DevHamid/wayne-openwrt/actions/runs/45885729188.
 
 **Important distinction:** run `45796829337` did build `debug/wayne-wlan-sfr-v2` and produced
