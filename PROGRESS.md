@@ -16,13 +16,39 @@ This page is the plain-English progress report. The technical details live in th
 | Full low-level modem control (QMI) from OpenWrt | ✅ Working |
 | Serial debug console over the same USB cable | ✅ Working |
 | ModemManager (the standard Linux modem service) | 🟡 Built into the ROM, being tested |
-| Wi-Fi (the phone's own radio) | 🟡 Firmware staged, bring-up in progress |
+| Wi-Fi (the phone's own radio) | 🔧 Blocked — kernel loads the Wi-Fi driver too early; corrected build running |
 | Automatic OTA updates | 🟡 Pipeline ready |
 
 **The headline:** the phone's modem used to crash every ~30 seconds. We found the exact cause
 (the modem's diagnostic stream had no reader on the OpenWrt side, so the modem choked on its own
 backlog) and fixed it. The modem now runs **stable for hours**, and it **registers on the cellular
-network** — the hard part is behind us.
+network** — the hardest modem work is behind us.
+
+---
+
+## 🆕 Latest update (Nov 26) — why Wi-Fi still refuses, and the real fix
+
+For a while we believed Wi-Fi was stuck in the modem firmware: the theory was that the phone never
+handed the Wi-Fi service over to the system, and that a timing fix would unlock it.
+
+To settle it we built a **diagnostic kernel that logs every step of that handover** and ran it on the
+phone. The result closed the question: **the handover is perfect.** Modem boots, the Wi-Fi service is
+announced, and every stage of the handshake completes cleanly. Nothing in the radio chain is broken.
+
+The actual cause is a build mistake, and a simple one:
+
+- The Wi-Fi driver was compiled **into** the kernel instead of being built as a separate loadable
+  piece. So it starts about **half a second after boot** — long before the modem wakes up at ~51 s —
+  asks for hardware that is not there yet, gives up, and never tries again.
+- The separate driver file shipped in the ROM is then refused by the kernel, because the kernel
+  already contains an identical copy of it. Two copies of the same driver cannot coexist.
+
+The fix is to rebuild from the branch that was always meant to ship it as a loadable module — the
+one that also carries the modem stability fixes. **That build is running now.** If it behaves, Wi-Fi
+should appear for the first time.
+
+**What this means:** the scary theory (broken firmware, broken modem) is off the table. What is left
+is ordinary engineering.
 
 ---
 
@@ -69,9 +95,12 @@ network** — the hard part is behind us.
 
 ## 🔜 What's next
 
-1. **Install the new ROM** (ModemManager + modem web page + Wi-Fi firmware) and verify it boots.
-2. **Turn on the LTE data connection** and run a small real-traffic test.
-3. **Bring up Wi-Fi** so the phone shares that connection.
+1. **Get Wi-Fi up** — flash the corrected kernel, confirm a Wi-Fi interface appears. This is the
+   current blocker and the whole point of the next device session.
+2. **Turn on the LTE data connection** — make the connection manager see the modem's data port,
+   then run a small real-traffic test.
+3. **Add the dashboard** — a page to see signal, data usage and control the link, once there is a
+   working connection behind it.
 4. **Polish**: Docker support, kernel tuning, and the automatic update pipeline.
 
 ---
