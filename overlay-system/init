@@ -39,13 +39,15 @@ mount -t devpts devpts /dev/pts 2>/dev/null || \
 mount -t tmpfs tmpfs /tmp 2>/dev/null || \
     echo "bootstrap: WARNING mount tmpfs failed" > /dev/console
 
-# --- 1. Start USB gadget setup asynchronously for diagnostics ---------------
+# --- 1. Build USB gadget SYNCHRONOUSLY (must complete before switch_root) ----
+# The background builder (&) was killed by switch_root, leaving the gadget
+# half-configured: enumerated but carrier=0, no DHCP/SSH. Run foreground so
+# the builder finishes before the PID 1 replacement at line 174.
 if [ -r /usb-gadget.sh ]; then
-    (
-        . /usb-gadget.sh
-        usb_gadget_up
-    ) >/dev/null 2>&1 &
-    echo "bootstrap: USB gadget setup started (pid=$!)" > /dev/console
+    echo "bootstrap: USB gadget setup starting (foreground)" > /dev/console
+    . /usb-gadget.sh
+    usb_gadget_up
+    echo "bootstrap: USB gadget setup complete" > /dev/console
 else
     echo "bootstrap: WARNING /usb-gadget.sh missing" > /dev/console
 fi
@@ -138,27 +140,6 @@ fi
 [ -x "$MNT/sbin/init" ] || bootstrap_fatal "$MNT has no /sbin/init executable"
 
 echo "bootstrap: system mounted; /sbin/init present" > /dev/console
-
-# --- 3d. Confirm the composite gadget actually bound before we hand over ----
-# The gadget is built above in a BACKGROUND subshell. switch_root replaces
-# PID 1, and if the binder has not written the UDC yet it is killed mid-build --
-# leaving the host with a gadget that enumerates but never configures (no
-# ttyGS0 getty, no usb0 carrier). Wait, bounded, for the UDC to reach
-# 'configured' before the handoff so the management link survives.
-if [ -r /usb-gadget.sh ]; then
-    gwait=0; bound=no
-    while [ "$gwait" -lt 15 ]; do
-        for u in /sys/class/udc/*; do
-            [ -e "$u" ] || continue
-            case "$(cat "$u/state" 2>/dev/null)" in
-                *configured*) bound=yes ;;
-            esac
-        done
-        [ "$bound" = yes ] && break
-        sleep 1; gwait=$((gwait+1))
-    done
-    echo "bootstrap: gadget bound=$bound after ${gwait}s" > /dev/console
-fi
 
 # --- 4. Hand off (mount --move + switch_root, same as installer) -----------
 mkdir -p "$MNT/dev" "$MNT/proc" "$MNT/sys" "$MNT/tmp"
