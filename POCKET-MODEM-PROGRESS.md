@@ -28,6 +28,26 @@ missing driver. Small, targeted, and ships as a normal swappable package —
 - The control channel is built and working.
 - The only blocker is pairing the data port, one layer we have now pinned.
 
+## Update — the blocker was the radio power state (fixed)
+
+The cellular data call was stuck because the **radio was in a `shutting-down`
+power state** — it was turning itself off. That one state caused every symptom:
+not-registered, no bearer, no data port, "no modems found."
+
+**Fixed:** the radio was powered back on and now shows **real signal
+(-92 dBm GSM)**. Antenna and modem hardware are fine. The SIM is in and
+readable.
+
+**The one link still remaining:** the radio has signal but has not yet
+*attached to the network* (it keeps "searching"). With good signal and a
+present SIM that keeps searching, the likely cause is **the SIM not being
+activated on a service plan** — a carrier-side step, not a software fix.
+
+**Validated on hardware:** the data interface (`rmnet_ipa0`) is present but
+registered in a way ModemManager's matching code does not recognise — the
+finding the planned fix targets is now **confirmed on the real device**, not
+just in theory.
+
 ## Next step
 
 Decode how ModemManager admits that interface, author the one-line fix, then
