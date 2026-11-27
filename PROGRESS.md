@@ -26,6 +26,29 @@ network** — the hardest modem work is behind us.
 
 ---
 
+## 🆕 Latest update (Nov 27, latest) — the modem's diagnostic-drain service is now actually running
+
+The modem-crash fix had one loose end. We'd written a small service (`wayne-diagd`) whose whole job is
+to keep the modem's diagnostic stream drained so the modem never chokes on it — but when we checked
+the running phone, that service **wasn't actually on the device**. It had been written and built, but
+the build recipe that produces the flashable ROM never included it, so the phone silently fell back to
+a simpler method that can't work on this hardware.
+
+**We found two problems and fixed both:**
+- **The service was never packaged into the ROM.** The ROM-building recipe skipped the step that
+  compiles it. Now that step runs before the ROM is assembled, so the service ships every time.
+- **Even if it had shipped, it would have failed to start.** The service has to perform a short
+  "handshake" with the modem's diagnostic hardware before it can read from it. Our first version sent
+  the wrong settings, which the hardware rejects. We corrected the settings to match what the hardware
+  requires.
+
+**Proven on the real phone:** we published the fixed ROM, the phone fetched it over the air and
+rebooted into it. The diagnostic-drain service is now confirmed **running** (the system reports it as
+up, and it's the real service, not the broken fallback). The phone has stayed up **19+ minutes with
+zero crash or starvation events** — the failure mode that used to appear within ~5 minutes is gone.
+
+---
+
 
 ## 🆕 Latest update (Nov 27, later #2) — two root causes found
 

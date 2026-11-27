@@ -5,6 +5,25 @@
 **Vision / definition of done:** phone = pocket modem + services box, finished entirely on vendor kernel 4.19 + ImmortalWrt **24.10** (OpenWrt fork). **The finish line = a flashable OpenWrt ROM installable from TWRP/OrangeFox (recovery zip) — no PC, no fastboot.** Mainline kernel + OpenWrt 25/newest are a *future* track after v1.0 (mainline still buggy: partial modem, broken power management — moving now would break more than it fixes).
 
 
+## Current status (updated 2026-11-27, latest — DIAG DRAIN FIXED, verified on device)
+
+- **The modem DIAG-starvation defect (the original ~90 s ERR_FATAL crash loop) is FIXED and verified on
+  hardware.** `wayne-diagd` now ships in the ROM and is actively draining `/dev/diag` under procd.
+  Root cause of why it never worked: the **split-ROM workflow** (`build-2410-split-rom.yml` — the only
+  one that produces the flashable ROM) never ran `build-diagd.sh`, so the binary was authored
+  (`a6babfe`) but never shipped. `assemble-2410.py` treats the copy as optional, so `diag-reader`
+  silently fell back to `cat /dev/diag` — which can never satisfy the kernel DIAG msg-mask handshake
+  (`diag_copy_to_user_msg_mask ... err: -22`). A second bug: the daemon's `SWITCH_LOGGING` payload sent
+  zeroed peripheral/device masks, which the driver rejects outright (EINVAL). Fixes (commit `0bcd2f1`):
+  added a build-diagd step to the split-ROM workflow **before** assemble, and corrected the daemon's
+  payload to the packed `diag_logging_mode_param_t` with `peripheral_mask`/`device_mask` bit0 set.
+  Two stale tests asserting the pre-`8b2db33` background/wait gadget design also surfaced en route and
+  were fixed (`77337a2`, `4968296`). Built with `release_tag` → published to GitHub Releases
+  (`wayne-24.10-diagd-20261127-1418`), pulled to the bridge, OTA'd to the device.
+  **On-device verification (uptime 19+ min):** `diag-reader` service `running: true`; procd runs
+  `/usr/lib/wayne/wayne-diagd` (pid alive), NOT the `cat` fallback; `dmesg | grep -ic 'dog_hb|starvation'`
+  = **0** (previously flooded after ~5 min). Board card **`t_089e0a03` closed**.
+
 ## Current status (updated 2026-11-27, later — BOOTLOOP FIXED, verified on device)
 
 - **The bootloop / USB-SSH failure is FIXED and verified on hardware.** Root cause: `/init` ran the USB
