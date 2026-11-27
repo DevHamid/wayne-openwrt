@@ -27,6 +27,26 @@ network** — the hardest modem work is behind us.
 ---
 
 
+## 🆕 Latest update (Nov 27, later #2) — two root causes found
+
+We probed the phone again while it was running (it stayed up 14+ minutes this time). Two clear findings:
+
+- **The diagnostic-drain service is written wrong.** It uses a simple `cat` to read the modem's
+  diagnostic stream, but that stream needs a proper "handshake" before it will talk. Without the
+  handshake the read fails (`Bad address`), so the service never actually drains anything. The good
+  news: the fix is to make the drain do the handshake the way our existing modem tool already knows
+  how — a small, contained change. (It hasn't caused a crash yet, but it's a landmine, so we'll fix it.)
+- **The modem hardware is fine — the software just isn't wiring it up.** On this boot the modem's
+  power-up, its firmware loading, and its internal driver all completed successfully. But the phone
+  still reported "no modem found." That pins the problem squarely on the connection-manager support
+  we already knew was missing (it doesn't know how to talk to this modem's network hardware), not on
+  broken hardware. That's the next thing to fix.
+
+We also learned the phone is now reached over the USB network link (SSH), since a normal OpenWrt boot
+has no adb — one of our automated checks mistakenly thought the phone was offline for that reason.
+
+---
+
 ## 🆕 Latest update (Nov 27, later) — the boot/reconnect bug is FIXED
 
 **We broke through the biggest day-to-day blocker.** Every time we flashed a new build, the phone

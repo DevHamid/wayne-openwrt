@@ -27,6 +27,27 @@
      still ships qcacld built-in `=y`. Expected; the module fix needs the
      `debug/wayne-wlan-sfr-v2` kernel, card **`t_922f2215`**.
 
+- **Deeper probe (uptime 860 s, build 8b2db33) — two root causes nailed.**
+  **(a) diag-reader: the drain is the wrong implementation.** `cat /dev/diag` returns
+  `cat: read error: Bad address` (rc=1); busybox hexdump reads exactly 4 bytes then faults. Kernel
+  spams every ~5 s: `diag: In diag_copy_to_user_msg_mask Unable to send msg masks to user space
+  clients, err: -22` (EINVAL). `/dev/diag` (major 237) is registered and the diag char server is up,
+  but `diag_copy_to_user_msg_mask` rejects the copy because the client never performed the DIAG
+  **ioctl msg-mask handshake**. A bare `cat` does no ioctl — it just read()s, which the driver refuses
+  until masks are exchanged. So the current `cat /dev/diag > /dev/null` drain can never work; the fix
+  is a reader that opens `/dev/diag`, performs the DIAG ioctl handshake (the sequence `tools/wayne-data.c`
+  already knows), then drains. Block-retry alone will not fix it. Card **`t_089e0a03`**.
+  **(b) modem: hardware is UP; the gap is purely the MM plugin.** On the same boot the modem subsystem
+  powers up cleanly — `IPA AFTER_POWERUP handling is complete`, `QMI_IPA_INIT_MODEM_DRIVER_REQ_V01`
+  sent + response received, `IPA uC loaded`, `wlan_pd` indication ACKed — yet `mmcli -L` still reports
+  "No modems were found" and only `rmnet_ctrl` + `wwan_ioctl` char nodes exist (no qmi/wwan netdev).
+  This confirms the blocker is exactly the stock MM 1.22 `qcom-soc` IPA-netport gap (no DPM Open Port
+  → no netdev created for MM to bind), not a modem-power or firmware problem. Card **`t_7236fbfd`**.
+  The two are independent bugs — do not couple the fixes.
+  **(c) Reachability note:** after the bootloop fix the phone runs OpenWrt (no adb in normal boot);
+  it is reached via **SSH over USB-ECM (192.168.1.1)**, not adb/tailnet. One worker probe wrongly
+  concluded the device was offline by checking adb only.
+
 ## Current status (updated 2026-11-27, earlier — pre-flash)
 
 - **WLAN status:** qcacld built into vmlinux (=y) on the locked v2 baseline; wlan.ko never loads due to duplicate symbol "__qdf_defer_func". The corrected kernel `debug/wayne-wlan-sfr-v2` (CONFIG_QCA_CLD_WLAN=m) is ready in CI run 45796829337 but not yet flashed. Wi-Fi pending that flash + modem data-call unblock (t_7236fbfd).
