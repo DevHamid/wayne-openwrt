@@ -305,8 +305,12 @@ def main():
         # kernel's diagchar driver returns EINVAL on a raw read until the
         # masks are set up (diag_copy_to_user_msg_mask err -22), so the drain
         # must speak the handshake. Built in CI (build-diagd.sh) and staged
-        # into build/diagd-out/wayne-diagd before assemble runs.
-        ('build/diagd-out/wayne-diagd', 'usr/lib/wayne/wayne-diagd'),
+        # into build/diagd-out/wayne-diagd before assemble runs. OPTIONAL: the
+        # standalone test-rootfs job does not run build-diagd.sh, so if the
+        # binary is absent we skip it and the diag-reader init falls back to
+        # `cat` (best-effort drain) rather than failing the whole assemble.
+        *([('build/diagd-out/wayne-diagd', 'usr/lib/wayne/wayne-diagd')]
+          if (repo / 'build/diagd-out/wayne-diagd').exists() else []),
         ('modem/rmtfs', 'etc/init.d/rmtfs'),
         ('scripts/modem-boot-trigger.init', 'etc/init.d/modem-boot-trigger'),
         ('overlay-openwrt/etc/uci-defaults/90-usb0-lan', 'etc/uci-defaults/90-usb0-lan'),
