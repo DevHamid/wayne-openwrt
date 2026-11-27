@@ -135,12 +135,24 @@ class BootstrapTests(unittest.TestCase):
         self.assertIn('test -f "$BL_DIR/qcom-spmi-wled.ko"', workflow)
 
     def test_bootstrap_starts_usb_gadget_without_blocking_system_lookup(self):
+        # The bootloop post-mortem (commit 8b2db33) established the OPPOSITE
+        # contract from what this test used to assert: usb_gadget_up MUST run
+        # FOREGROUND. The old background subshell (&) was killed mid-build by
+        # switch_root on cold boots, leaving the gadget half-configured
+        # (carrier=0, no DHCP/SSH). Foreground guarantees the gadget completes
+        # before the PID-1 handoff.
         init = (BASE / 'overlay-system/init').read_text()
-        start = init.index('USB gadget setup started')
+        # Gadget section must begin before the system-partition lookup...
+        start = init.index('USB gadget setup starting (foreground)')
+        complete = init.index('USB gadget setup complete')
         locate = init.index('locating system partition')
-        self.assertLess(start, locate)
+        self.assertLess(start, complete)
+        self.assertLess(complete, locate)
         gadget = init[init.index('if [ -r /usb-gadget.sh ]'):locate]
-        self.assertRegex(gadget, r'\) >/dev/null 2>&1 &')
+        # ...and must run SYNCHRONOUSLY: no backgrounding operator may appear
+        # in the gadget section, or switch_root can kill it mid-build again.
+        self.assertNotRegex(gadget, r'\) >/dev/null 2>&1 &')
+        self.assertIn('usb_gadget_up', gadget)
 
 
 class ModemServiceTests(unittest.TestCase):
