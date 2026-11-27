@@ -5,6 +5,21 @@
 **Vision / definition of done:** phone = pocket modem + services box, finished entirely on vendor kernel 4.19 + ImmortalWrt **24.10** (OpenWrt fork). **The finish line = a flashable OpenWrt ROM installable from TWRP/OrangeFox (recovery zip) — no PC, no fastboot.** Mainline kernel + OpenWrt 25/newest are a *future* track after v1.0 (mainline still buggy: partial modem, broken power management — moving now would break more than it fixes).
 
 
+## LTE data call (pocket modem) — net-port blocker (2026-11-28)
+
+Control channel is up and verified: MM builds the `qrtr/qrtr0` control port and
+enumerates the full bus (qrtr-ns + `WITH_QRTR`, both on-device). The modem is
+then disposed on the **net port**: `Failed to find a net port in the QMI modem`
+(raised at `mm-broadband-modem.c constructed()`, lines 1610-1615, when the QMI
+modem has zero admitted NET ports).
+
+Cause: `rmnet_ipa0` is a parentless virtual netdev (`/sys/devices/virtual/net/`,
+no `device` parent, no driver string), so `mm_kernel_device_get_driver` returns
+empty and `peek_port_qmi_for_data`'s `driver == "ipa"` compare never matches —
+the IPA data branch is never entered. Fix target: select/tag `rmnet_ipa0` by
+**name** as the IPA data candidate. Still Option A (MM plugin, swappable .ipk,
+no kernel, reversible). Traceable on Kanban t_7236fbfd.
+
 ## Current status (updated 2026-11-27, latest — DIAG DRAIN FIXED, verified on device)
 
 - **The modem DIAG-starvation defect (the original ~90 s ERR_FATAL crash loop) is FIXED and verified on
