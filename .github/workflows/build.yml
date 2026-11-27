@@ -112,6 +112,18 @@ jobs:
           ./scripts/build-rmtfs.sh "$GITHUB_WORKSPACE/build/rmtfs-out"
           ls -l "$GITHUB_WORKSPACE/build/rmtfs-out/rmtfs"
 
+      - name: Build wayne-diagd userspace (static aarch64, /dev/diag drain)
+        run: |
+          # The modem DIAG drain must HOLD /dev/diag open (else the modem's
+          # diag task starves -> ERR_FATAL ~90s). A bare `cat` worked on the
+          # adios kernel but the v2 kernel's diagchar driver rejects a raw
+          # read until the msg-mask handshake is done (diag_copy_to_user_msg_mask
+          # err -22). wayne-diagd does the handshake then drains, and is static
+          # so it drops onto the aarch64 rootfs with no libc deps.
+          chmod +x scripts/build-diagd.sh
+          ./scripts/build-diagd.sh "$GITHUB_WORKSPACE/build/diagd-out"
+          test -x "$GITHUB_WORKSPACE/build/diagd-out/wayne-diagd"
+
       - name: Assemble OpenWrt initramfs (full rootfs)
         run: |
           mkdir -p build/openwrt

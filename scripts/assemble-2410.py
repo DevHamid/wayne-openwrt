@@ -300,6 +300,13 @@ def main():
         # Android keeps qcrild on it all boot; this init service does the
         # same job on OpenWrt. Must be in every ROM.
         ('overlay-openwrt/etc/init.d/diag-reader', 'etc/init.d/diag-reader'),
+        # wayne-diagd: /dev/diag drain that performs the DIAG ioctl msg-mask
+        # handshake. A bare `cat` worked on the adios kernel, but the v2
+        # kernel's diagchar driver returns EINVAL on a raw read until the
+        # masks are set up (diag_copy_to_user_msg_mask err -22), so the drain
+        # must speak the handshake. Built in CI (build-diagd.sh) and staged
+        # into build/diagd-out/wayne-diagd before assemble runs.
+        ('build/diagd-out/wayne-diagd', 'usr/lib/wayne/wayne-diagd'),
         ('modem/rmtfs', 'etc/init.d/rmtfs'),
         ('scripts/modem-boot-trigger.init', 'etc/init.d/modem-boot-trigger'),
         ('overlay-openwrt/etc/uci-defaults/90-usb0-lan', 'etc/uci-defaults/90-usb0-lan'),
