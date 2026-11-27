@@ -126,21 +126,37 @@ int main(int argc, char **argv)
     try_ioctl(fd, DIAG_IOCTL_REMOTE_DEV, &remote_dev, "DIAG_IOCTL_REMOTE_DEV");
 
     /* 2b. Switch logging to MEMORY_DEVICE so the driver routes DIAG to the
-     *     registered client (us) instead of expecting a USB host. Some trees
-     *     want a 12-byte struct {req_mode, peripheral_mask, mode_param}; we
-     *     zero it and set req_mode — the driver ignores trailing fields it
-     *     does not know. */
+     *     registered client (us) instead of expecting a USB host. The struct
+     *     must match include/linux/diagchar.h's diag_logging_mode_param_t
+     *     (__packed, 28 bytes):
+     *       u32 req_mode; u32 peripheral_mask; u32 pd_mask;
+     *       u8  mode_param; u8 diag_id; u8 pd_val; u8 reserved;
+     *       int peripheral; int device_mask;
+     *     The driver hard-requires BOTH masks non-zero:
+     *       - peripheral_mask == 0  -> diag_switch_logging returns -EINVAL
+     *       - device_mask     == 0  -> diag_switch_logging_proc switches nothing
+     *     bit0 of each is the modem (PERIPHERAL_MODEM=0) / local proc
+     *     (DIAG_PROC_LOCAL=0). A bare `cat` sends no ioctl at all, which is why
+     *     it can never satisfy this handshake. */
     {
         struct {
             uint32_t req_mode;
             uint32_t peripheral_mask;
+            uint32_t pd_mask;
             uint8_t  mode_param;
-            uint8_t  pad[16];   /* room for newer/larger structs */
-        } mode;
+            uint8_t  diag_id;
+            uint8_t  pd_val;
+            uint8_t  reserved;
+            int32_t  peripheral;
+            int32_t  device_mask;
+        } __attribute__((packed)) mode;
         memset(&mode, 0, sizeof(mode));
-        mode.req_mode = DIAG_MEMORY_DEVICE_MODE;
-        mode.peripheral_mask = 0;      /* all peripherals */
-        mode.mode_param = 0;
+        mode.req_mode       = DIAG_MEMORY_DEVICE_MODE;
+        mode.peripheral_mask = 1u << 0;   /* PERIPHERAL_MODEM */
+        mode.pd_mask        = 0;          /* no PD (sub-system) session */
+        mode.mode_param     = 0;
+        mode.peripheral     = -1;         /* unused when pd_mask==0 */
+        mode.device_mask    = 1u << 0;    /* DIAG_PROC_LOCAL */
         try_ioctl(fd, DIAG_IOCTL_SWITCH_LOGGING, &mode, "DIAG_IOCTL_SWITCH_LOGGING");
     }
 

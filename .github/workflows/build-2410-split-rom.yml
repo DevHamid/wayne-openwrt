@@ -82,6 +82,22 @@ jobs:
           sh scripts/test-ota.sh
           sh scripts/test-usb-gadget-bringup.sh
 
+      - name: Build wayne-diagd userspace (static aarch64, /dev/diag drain)
+        run: |
+          set -euo pipefail
+          # The modem's diag task starves ("dog_hb: Task starvation: diag" ->
+          # ERR_FATAL ~90s crash loop) when nothing drains /dev/diag. The v2
+          # (LKGeek) diagchar driver rejects a raw read until the DIAG ioctl
+          # msg-mask handshake is done, so a bare `cat /dev/diag` can never
+          # satisfy it (diag_copy_to_user_msg_mask err -22). wayne-diagd does
+          # the handshake (REMOTE_DEV/SWITCH_LOGGING/COMMAND_REG) then drains.
+          # assemble-2410.py stages build/diagd-out/wayne-diagd into the rootfs
+          # ONLY if the binary exists -- so this step must run BEFORE assemble,
+          # otherwise the diag-reader init silently falls back to `cat`.
+          chmod +x scripts/build-diagd.sh
+          ./scripts/build-diagd.sh "$GITHUB_WORKSPACE/build/diagd-out"
+          test -x "$GITHUB_WORKSPACE/build/diagd-out/wayne-diagd"
+
       - name: Assemble ImmortalWrt 24.10.4 system rootfs
         run: |
           set -euo pipefail
