@@ -27,7 +27,32 @@ network** — the hardest modem work is behind us.
 ---
 
 
-## 🆕 Latest update (Nov 27) — device in recovery, bootloop/USB picocom/SSH pending, WLAN module pending
+## 🆕 Latest update (Nov 27, later) — the boot/reconnect bug is FIXED
+
+**We broke through the biggest day-to-day blocker.** Every time we flashed a new build, the phone
+would come back up but the USB connection would be dead — no SSH, no serial console, and we'd have to
+power-cycle into recovery to reach it again. That made every test slow and risky.
+
+**We found why, and fixed it.** During startup the phone was setting up its USB connection in the
+background, and the moment it switched to the main system that background job got cut off halfway.
+The fix: set up the USB connection in the foreground so it finishes before the handover.
+
+**Proven on the real phone:** we flashed the fixed build from recovery and it came back up clean —
+SSH over the USB cable connected within 90 seconds, and it stayed up for 8+ minutes (the old builds
+died at ~90 seconds). No power-cycle needed between flashes any more. This makes every future test
+faster and safer.
+
+**Still on the to-do list (separate items, not new problems):**
+- **Wi-Fi** still blocked — the phone's Wi-Fi driver is built into the kernel instead of loading
+  separately; needs the corrected kernel build (tracked on the board).
+- **Cellular data** still blocked — the phone's modem isn't creating the network device the
+  connection manager needs (tracked on the board).
+- One housekeeping item: the small service that keeps the modem's diagnostic stream drained isn't
+  starting cleanly. It isn't causing crashes right now, but we'll tidy it up.
+
+---
+
+## 🆕 Latest update (Nov 27, earlier) — device in recovery, bootloop/USB picocom/SSH pending, WLAN module pending
 
 - **Phone in OrangeFox recovery** — device was wedged after the last flash; no booted OpenWrt system. SSH/picocom unavailable. User must re-seat USB cable and, if screen dark, hold Power to restart into recovery.
 - **Bootloop / USB picocom / SSH issue FIXED** — root cause: /init ran gadget builder in background subshell; switch_root killed incomplete build. Fix (commit 8b2db33): run usb_gadget_up foreground so builder completes before switch_root. CI build 45970126301 in progress.

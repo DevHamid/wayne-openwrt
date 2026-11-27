@@ -5,10 +5,30 @@
 **Vision / definition of done:** phone = pocket modem + services box, finished entirely on vendor kernel 4.19 + ImmortalWrt **24.10** (OpenWrt fork). **The finish line = a flashable OpenWrt ROM installable from TWRP/OrangeFox (recovery zip) — no PC, no fastboot.** Mainline kernel + OpenWrt 25/newest are a *future* track after v1.0 (mainline still buggy: partial modem, broken power management — moving now would break more than it fixes).
 
 
-## Current status (updated 2026-11-27)
+## Current status (updated 2026-11-27, later — BOOTLOOP FIXED, verified on device)
 
-- **Phone in OrangeFox recovery** — device was wedged after the last flash; no booted OpenWrt system. SSH/picocom unavailable. User must re-seat USB cable and, if screen dark, hold Power to restart into recovery.
-- **Bootloop / USB picocom / SSH issue FIXED** — root cause: /init ran gadget builder in background subshell; switch_root killed incomplete build. Fix (commit 8b2db33): run usb_gadget_up foreground so builder completes before switch_root. CI build 45970126301 in progress.
+- **The bootloop / USB-SSH failure is FIXED and verified on hardware.** Root cause: `/init` ran the USB
+  gadget builder in a **background subshell**, then `exec switch_root` — which killed the builder
+  mid-build on cold boots, leaving the gadget enumerated but half-configured (carrier=0, no DHCP, no
+  SSH, locked picocom port). Fix (commit `8b2db33`): run `usb_gadget_up` **foreground** so it completes
+  before the PID-1 handoff, and drop the now-redundant 15s UDC wait block. Flashed to the device from
+  OrangeFox recovery (build `8b2db33`, CI `45970126301`): clean mke2fs install, rootfs verified, boot
+  flashed. **On-device result: booted to ImmortalWrt 24.10.4, SSH over USB-ECM reachable within 90 s,
+  uptime 474 s+ (8 min) stable with carrier=1 and no power-cycle** — previous builds died at ~90 s.
+  `usb-gadget` log confirms `UDC=a800000.dwc3`, `ttyGS0 ready`, `usb0 link: carrier=1 state=up`,
+  IP `192.168.1.1/24`, dropbear listening. Board card **`t_31b6f242` closed**.
+- **Two pre-existing issues surfaced on this boot (owned by other cards, not regressions):**
+  1. `diag-reader` procd instance exits rc=1 (`cat /dev/diag` fails) — the modem DIAG drain isn't
+     running. No starvation yet (474 s uptime, zero `dog_hb` / `Fatal error on the modem`), so the
+     modem is not crashing on this boot, but the reader needs a look. **New follow-up.**
+  2. Modem not registering: `mmcli -L` → "No modems were found", only `rmnet_ctrl` + `wwan_ioctl`
+     nodes, no qmi/wwan netdev — the known IPA net-port blocker, card **`t_7236fbfd`**.
+  3. WLAN still down: `__qdf_defer_func` still owned by vmlinux (`T`, no module column) — this build
+     still ships qcacld built-in `=y`. Expected; the module fix needs the
+     `debug/wayne-wlan-sfr-v2` kernel, card **`t_922f2215`**.
+
+## Current status (updated 2026-11-27, earlier — pre-flash)
+
 - **WLAN status:** qcacld built into vmlinux (=y) on the locked v2 baseline; wlan.ko never loads due to duplicate symbol "__qdf_defer_func". The corrected kernel `debug/wayne-wlan-sfr-v2` (CONFIG_QCA_CLD_WLAN=m) is ready in CI run 45796829337 but not yet flashed. Wi-Fi pending that flash + modem data-call unblock (t_7236fbfd).
 - **Modem:** Registered (CS=PS=serving), SIM readable. ModemManager in ROM, LuCI page present. Data-call blocked by MM `qcom-soc` plugin: `Failed to find a net port in the QMI modem` — no IPA netdev support, rmnet_ipa0 has no parent QMI device. Next: patch plugin or replicate DPM open from tools/wayne-data.c.
 - **Progress:** Build 45885729188 green; release m9-2410-complete-87ef463 published; device in recovery awaiting user re-plug. Board review complete: t_31b6f242 (bootloop investigation, priority 40, ready), t_922f2215 (wifi module registration, ready), t_7236fbfd (modem data call, blocked on IPA netdev), t_ab8e0a26 + t_8d35d152 (WebUI, gated on modem data).
