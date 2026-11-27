@@ -35,17 +35,30 @@ UDC_NAME=a600000.dwc3
 
 # ---------------------------------------------------------------------------
 # 0. Static ordering assertions (source order IS the boot ordering).
+#
+# CONTRACT (post-bootloop-fix 8b2db33): usb_gadget_up runs SYNCHRONOUSLY in the
+# foreground and COMPLETES before 'exec switch_root'. The old design launched
+# the builder in a background subshell (&) and then waited (bounded, 15s) for
+# the UDC to reach "configured". switch_root killed that background builder
+# mid-build on cold boots -> gadget half-configured (carrier=0, no DHCP/SSH).
+# The fix removed BOTH the background launch AND the wait block: the builder
+# now runs to completion inline. So we assert foreground-and-before-handoff,
+# and assert the removal of the background/wait pattern that caused the bug.
 # ---------------------------------------------------------------------------
 bg_line=$(grep -n 'usb_gadget_up' "$INIT" | head -n1 | cut -d: -f1)
-wait_line=$(grep -n 'gwait=0; bound=no' "$INIT" | cut -d: -f1)
 handoff_line=$(grep -n 'exec switch_root' "$INIT" | cut -d: -f1)
-[ -n "$bg_line" ] && [ -n "$wait_line" ] && [ -n "$handoff_line" ] \
-    && [ "$bg_line" -lt "$wait_line" ] && [ "$wait_line" -lt "$handoff_line" ] \
-    && ok "init ordering: gadget build ($bg_line) < configured-wait ($wait_line) < switch_root ($handoff_line)" \
-    || bad "init ordering broken (bg=$bg_line wait=$wait_line handoff=$handoff_line)"
+[ -n "$bg_line" ] && [ -n "$handoff_line" ] && [ "$bg_line" -lt "$handoff_line" ] \
+    && ok "init ordering: gadget build ($bg_line) < switch_root ($handoff_line)" \
+    || bad "init ordering broken (bg=$bg_line handoff=$handoff_line)"
 
-grep -q '\-lt 15' "$INIT" \
-    && ok "init wait is bounded (15s)" || bad "init wait is not bounded"
+# The bootloop bug pattern must be GONE: no backgrounded gadget builder and no
+# leftover bounded-wait block. Their presence would mean a regression to the
+# switch_root-kills-the-builder failure mode.
+if grep -qE 'usb_gadget_up[[:space:]]*&|gwait=0; bound=no' "$INIT"; then
+    bad "init still has the background/wait gadget pattern (bootloop regression)"
+else
+    ok "init has no background/wait gadget pattern (foreground contract)"
+fi
 
 def_line=$(grep -n '^usb0_link_up()' "$HELPER" | cut -d: -f1)
 calls=$(grep -c '^[[:space:]]*usb0_link_up$' "$HELPER")
@@ -138,42 +151,15 @@ check "already-bound: usb0 still linked up on the early-return path" \
     grep -Fqx "ip link set usb0 up" "$R/calls.log"
 
 # ---------------------------------------------------------------------------
-# 3. Bootstrap wait block, extracted verbatim from the patched init.
+# 3. (removed) Bootstrap wait block.
+#
+# The bootloop fix (8b2db33) removed the bounded configured-wait block from
+# /init entirely: usb_gadget_up now runs synchronously in the foreground, so
+# there is no separate wait loop to extract or exercise. The ordering
+# assertions in section 0 now cover the foreground contract (builder completes
+# before switch_root, no background/wait pattern present). Retained here as a
+# note so the removed coverage is not mistaken for a gap.
 # ---------------------------------------------------------------------------
-ws=$(grep -n 'gwait=0; bound=no' "$INIT" | cut -d: -f1)
-we=$(grep -n 'bootstrap: gadget bound=' "$INIT" | cut -d: -f1)
-[ -n "$ws" ] && [ -n "$we" ] || { bad "cannot locate wait block in init"; ws=1; we=1; }
-sed -n "${ws},${we}p" "$INIT" \
-    | sed -e "s|/sys/class|$WORK/wsys/class|g" -e "s|/dev/console|$WORK/console|g" \
-    > "$WORK/waitblock.sh"
-
-run_waitblock() { # $1 = extra sed for the cat stub behaviour selector
-    mkdir -p "$WORK/wsys/class/udc/$UDC_NAME" "$WORK/wbin"
-    echo "not attached" > "$WORK/wsys/class/udc/$UDC_NAME/state"
-    : > "$WORK/console"; : > "$WORK/catcount"
-    # cat stub: first 2 reads of a */state file return the seed, then $1.
-    # NB: /bin/cat (not `cat`) for the counter read -- the stub itself is
-    # first in PATH, so an unqualified `cat` would recurse into itself.
-    printf '#!/bin/sh\nn=$(/bin/cat %s/catcount 2>/dev/null); n=${n:-0}\n' "$WORK" > "$WORK/wbin/cat"
-    printf 'case "$1" in */state) n=$((n+1)); echo "$n" > %s/catcount; if [ "$n" -ge 2 ]; then echo %s; else echo "not attached"; fi; exit 0;; esac\nexec /bin/cat "$@"\n' "$WORK" "$1" >> "$WORK/wbin/cat"
-    printf '#!/bin/sh\nexit 0\n' > "$WORK/wbin/sleep"   # instant 15-iteration loop
-    chmod +x "$WORK/wbin/cat" "$WORK/wbin/sleep"
-    ( PATH="$WORK/wbin:$PATH"; . "$WORK/waitblock.sh" )
-    # The block reports through /dev/console (rewritten into the sandbox).
-    cat "$WORK/console"
-}
-
-out=$(run_waitblock configured)
-echo "$out" | grep -Eq 'gadget bound=yes after [0-9]+s' \
-    && ok "wait block: reports bound=yes once state reaches configured" \
-    || bad "wait block: no bound=yes (got: $out)"
-echo "$out" | grep -q 'bound=no' \
-    && bad "wait block: false negative" || true
-
-out=$(run_waitblock "still not attached")
-echo "$out" | grep -Eq 'gadget bound=no after 15s' \
-    && ok "wait block: gives up bounded at 15s (bound=no after 15s)" \
-    || bad "wait block: bound not reported as 'no after 15s' (got: $out)"
 
 # ---------------------------------------------------------------------------
 # 4. S95 hardening: rebuild once when a UDC still reads "not attached".
