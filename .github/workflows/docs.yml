@@ -5,6 +5,11 @@ name: docs
 
 on:
   push:
+    # Single push block: `tags` and `branches`/`paths` are siblings. A tag push
+    # (refs/tags/v*) matches `tags` and skips the branch/paths filters; a main push
+    # matches `branches` and is gated by `paths`. Keeping them in ONE block (not two
+    # `push:` keys) — GitHub ANDs branches+paths, so a tag push must not be forced
+    # through them, and a duplicate `push:` key would silently drop one of them.
     branches: [main]
     paths:
       - "README.md"
