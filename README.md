@@ -82,7 +82,30 @@ no kernel, reversible). Traceable on Kanban t_7236fbfd.
   it is reached via **SSH over USB-ECM (192.168.1.1)**, not adb/tailnet. One worker probe wrongly
   concluded the device was offline by checking adb only.
 
-## Current status (updated 2026-11-27, earlier — pre-flash)
+## Current status (updated 2026-11-28)
+
+- **2026-11-28 — Modem data-call root cause FOUND and FIXED (build side): OpenWrt's own mux-noise filter
+  was swallowing the IPA netdev. Not a plugin gap, not a kernel bug.** The `qcom-soc` plugin aborts with
+  `Failed to find a net port in the QMI modem`, leaving the modem unpaired and the SIM's UIM app never
+  initializing. Root cause traced to OpenWrt's `modemmanager.common` → `mm_report_event()`: OpenWrt ships
+  MM with `-Dudev=false` and no `77-mm-qcom-soc.rules`, so port events reach MM only via `mm_report_event()`.
+  That helper suppresses *virtual* netdevs (sysfspath containing `/virtual/`) except a fixed allowlist
+  (`qmapmux*`/`qmimux*`/`mbimmux*`), returning 1 for everything else. `rmnet_ipa0` lives at
+  `/sys/devices/virtual/net/rmnet_ipa0`, so the mux filter swallowed the IPA data port and MM never saw it.
+  **Disproves the earlier "MM 1.22 has no IPA support" theory** — MM 1.20 NEWS added "QRTR+IPA" + "DPM Open
+  Port on IPA setups", so 1.22 supports it; the netdev just never reached the plugin.
+  **Fix (commit-level, build side):** new `patch_ipa_netport()` in `scripts/assemble-2410.py` patches
+  `modemmanager.common` during ROM assembly to add `rmnet_ipa*` to the allowlist, so the IPA netdev is
+  reported and the plugin pairs control+net into one modem object (running the IPA DPM Open Port TX/RX
+  binding). Verified against a synthetic `modemmanager.common`: `rmnet_ipa0` now hits the new
+  `"rmnet_ipa"*)` case (logged + reported), all other noise still hits `*) return 1`, and the patch is
+  idempotent. **On-device verification still pending** (device pending): `mmcli -L` showing a modem object,
+  UIM app `detected`→`initialized`, NAS `registered` home, bearer up on `rmnet_ipa0`.
+
+- **WLAN status:** qcacld built into vmlinux (=y) on the locked v2 baseline; wlan.ko never loads due to duplicate symbol "__qdf_defer_func". The corrected kernel `debug/wayne-wlan-sfr-v2` (CONFIG_QCA_CLD_WLAN=m) is ready in CI run 45796829337 but not yet flashed. Wi-Fi pending that flash + modem data-call unblock (t_7236fbfd).
+- **Modem:** Registered (CS=PS=serving), SIM readable. ModemManager in ROM, LuCI page present. Data-call root cause now found — OpenWrt's `modemmanager.common` mux filter suppressed the IPA netdev `rmnet_ipa0`; fixed in `scripts/assemble-2410.py` (`patch_ipa_netport`). Awaiting on-device verify.
+- **Progress:** Build 45885729188 green; release m9-2410-complete-87ef463 published; device in recovery awaiting user re-plug. Board review complete: t_31b6f242 (bootloop investigation, priority 40, ready), t_922f2215 (wifi module registration, ready), t_7236fbfd (modem data call, blocked on IPA netdev), t_ab8e0a26 + t_8d35d152 (WebUI, gated on modem data).
+## Current status (updated 2026-11-26)
 
 - **WLAN status:** qcacld built into vmlinux (=y) on the locked v2 baseline; wlan.ko never loads due to duplicate symbol "__qdf_defer_func". The corrected kernel `debug/wayne-wlan-sfr-v2` (CONFIG_QCA_CLD_WLAN=m) is ready in CI run 45796829337 but not yet flashed. Wi-Fi pending that flash + modem data-call unblock (t_7236fbfd).
 - **Modem:** Registered (CS=PS=serving), SIM readable. ModemManager in ROM, LuCI page present. Data-call blocked by MM `qcom-soc` plugin: `Failed to find a net port in the QMI modem` — no IPA netdev support, rmnet_ipa0 has no parent QMI device. Next: patch plugin or replicate DPM open from tools/wayne-data.c.

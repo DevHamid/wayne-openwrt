@@ -161,6 +161,44 @@ def install_wifi(root):
     return [{k: p[k] for k in ('Package', 'Version', 'Filename', 'SHA256sum')} for p in added.values()]
 
 
+def patch_ipa_netport(root):
+    """Let ModemManager's hotplug report the IPA netdev `rmnet_ipa0`.
+
+    OpenWrt ships ModemManager with `-Dudev=false` and no `77-mm-qcom-soc.rules`;
+    port events reach the daemon only via `/etc/hotplug.d/*` scripts calling
+    `mm_report_event()` in `modemmanager.common`. That helper suppresses *virtual*
+    netdevs (sysfspath containing `/virtual/`) except a fixed allowlist
+    (`qmapmux*`/`qmimux*`/`mbimmux*`), returning 1 for everything else. `rmnet_ipa0`
+    lives at `/sys/devices/virtual/net/rmnet_ipa0`, so the mux-noise filter swallows
+    the IPA data port, and the `qcom-soc` plugin never pairs it with the QMI control
+    port -> "Failed to find a net port in the QMI modem".
+
+    Add `rmnet_ipa*` to the allowlist so the IPA netdev is reported. The plugin
+    (MM >= 1.20 supports QRTR+IPA) then pairs control+net into one modem object and
+    runs the IPA 'DPM Open Port' sequence that binds the hardware TX/RX endpoints.
+    This is the durable fix for the SDM660 built-in SoC modem data-call under OpenWrt.
+    Idempotent: skips cleanly if already patched or the file is absent.
+    """
+    common = root / 'usr/share/ModemManager/modemmanager.common'
+    if not common.is_file():
+        raise ValueError('modemmanager.common not found; cannot patch IPA netport')
+    text = common.read_text()
+    if 'rmnet_ipa' in text:
+        return  # already patched
+    old = '\t\t\t*)\n\t\t\t\treturn 1\n\t\t\t\t;;\n'
+    new = ('\t\t\t# IPA data port of the built-in Qualcomm SoC modem (sdm660):\n'
+           '\t\t\t# must be reported so the qcom-soc plugin pairs it with the QMI\n'
+           '\t\t\t# control port and runs the IPA DPM Open Port TX/RX binding.\n'
+           '\t\t\t"rmnet_ipa"*)\n'
+           '\t\t\t\tmm_log "debug" "IPA netdevice $name"\n'
+           '\t\t\t\t;;\n'
+           '\t\t\t*)\n'
+           '\t\t\t\treturn 1\n\t\t\t\t;;\n')
+    if old not in text:
+        raise ValueError('mux-allowlist fallthrough not found; upstream file changed')
+    common.write_text(text.replace(old, new, 1))
+
+
 def install_modem(root):
     """Install ModemManager + LuCI glue so the built-in sdm660 modem is
     controllable from OpenWrt. ModemManager's `qcom-soc` plugin speaks QMI
@@ -220,6 +258,7 @@ def install_modem(root):
 
     for name in requested:
         install(name)
+    patch_ipa_netport(root)
     keep = [p for p in old if p['Package'] != 'kernel' and not p['Package'].startswith('kmod-')]
     status.write_text('\n\n'.join('\n'.join(f'{k}: {v}' for k, v in p.items()) for p in keep + list(added.values())) + '\n\n')
     return [{k: p[k] for k in ('Package', 'Version', 'Filename', 'SHA256sum')} for p in added.values()]

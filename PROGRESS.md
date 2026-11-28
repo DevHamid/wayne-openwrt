@@ -13,6 +13,7 @@ This page is the plain-English progress report. The technical details live in th
 | Remote access (SSH over the USB cable) | ✅ Working, reliable |
 | **Phone modem stays alive** (no more crash loop) | ✅ **Fixed and verified** |
 | **Modem registered on the cellular network** | ✅ Working |
+| **LTE data connection (internet over the modem)** | 🔧 Fix built into the image; awaiting test on the phone |
 | Full low-level modem control (QMI) from OpenWrt | ✅ Working |
 | Serial debug console over the same USB cable | ✅ Working |
 | ModemManager (the standard Linux modem service) | 🟡 Built into the ROM, being tested |
@@ -23,6 +24,36 @@ This page is the plain-English progress report. The technical details live in th
 (the modem's diagnostic stream had no reader on the OpenWrt side, so the modem choked on its own
 backlog) and fixed it. The modem now runs **stable for hours**, and it **registers on the cellular
 network** — the hardest modem work is behind us.
+
+---
+
+## 🆕 Latest update (Nov 28) — we found and fixed the thing blocking the LTE data connection
+
+**Where we are:** the phone's modem already boots, stays stable, and registers on the cellular network.
+The one thing left before it works as a real pocket modem is the **LTE data connection** — the link that
+carries actual traffic. We've been stuck on that, and this week we finally found *why*.
+
+**What was wrong:** the standard Linux modem software (ModemManager) couldn't finish setting up the
+modem because it never saw the modem's **data port** — the piece that carries internet traffic.
+It kept saying "can't find a data port" and gave up.
+
+**The surprising cause:** it wasn't the modem, and it wasn't the kernel. It was a safety filter inside
+the standard Linux software itself. That filter is meant to ignore ordinary network "noise" that this
+kind of phone doesn't use — but the modem's real data port looked enough like that noise that the
+software **silently threw it away** before the modem ever got a chance to use it.
+
+**The fix:** we taught the software to recognize this phone's modem data port and let it through.
+The change is now part of how the flashable image is built, so every future build includes it.
+
+**What this means:** if it holds up on the phone, the modem software should finally pair the modem's
+control and data sides together — the step it's been failing — and the SIM's identity and the LTE
+link can come up. That's the difference between "modem registered" and "modem works as a hotspot."
+
+**Honest status:** the fix is written, built into the image recipe, and **verified against a test copy**
+of the software's config. It is **not yet confirmed on the real phone** — the phone wasn't reachable
+during this session. The moment it's plugged in, the test is simple: does the modem software now show
+a modem object, does the SIM finish activating, and does the data link come up. We'll report the result
+either way.
 
 ---
 
