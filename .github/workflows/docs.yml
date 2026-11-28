@@ -97,6 +97,13 @@ jobs:
   changelog:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
+    # Job-scoped, not workflow-level (a workflow-level block would clobber every job's
+    # inherited default). `workflows: write` is required because the commit-back
+    # rebases onto a moving main that may carry .github/workflows/* changes — pushing
+    # those needs the workflows scope, which contents:write alone lacks.
+    permissions:
+      contents: write
+      workflows: write
     steps:
       - uses: actions/checkout@v4
         with:
