@@ -139,6 +139,20 @@ def classify(c: dict, legacy: dict[str, str], fallback: str, kernel_sections: bo
 
 def render(commits: list[dict], version: str, date: str, repo: str | None,
            prev: str | None, exclude: set[str], contributors: bool = True) -> str:
+    # Drop bot-authored and [skip ci] commits — they are pipeline noise, not a change
+    # that shipped. Without this, a single docs push can flood a release that carried
+    # two real changes with a dozen "regenerate diagrams [skip ci]" lines.
+    BOT_AUTHORS = {"github-actions[bot]", "dependabot[bot]"}
+    def is_noise(c: dict) -> bool:
+        if (c.get("author") or "") in BOT_AUTHORS:
+            return True
+        if "[skip ci]" in (c.get("subject") or "") or "[skip ci]" in (c.get("body") or ""):
+            return True
+        return False
+    noise = sum(1 for c in commits if is_noise(c))
+    commits = [c for c in commits if not is_noise(c)]
+    if noise:
+        print(f"dropped {noise} bot/[skip ci] commit(s) from the release")
     merged = [c for c in commits if c["type"] not in exclude]
     groups: dict[str, list[dict]] = {}
     for c in sorted(merged, key=lambda c: (ORDER.get(c["type"], 99), c["date"], c["short"])):

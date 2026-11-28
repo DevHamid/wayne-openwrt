@@ -23,7 +23,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  LEGACY_MAP: "2410=build,CI=ci,README=docs,ota=ota,check-pack=build,wlan=wifi,modem=modem,radio=radio,wifi=wifi,usb-gadget=usb,screen=screen"
+  LEGACY_MAP: "2410=build,CI=ci,README=docs,ota=ota,check-pack=build,wlan=wifi,modem=modem,radio=radio,wifi=wifi,usb-gadget=usb,screen=screen,assembler=build,diag=build,scripts=build,tools=feat"
 
 jobs:
   diagrams:
@@ -122,10 +122,13 @@ jobs:
             || gh release edit "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
 
       - name: commit CHANGELOG back
-        if: github.ref == 'refs/heads/main'
+        # tag push carries CHANGELOG.md in the tag commit; propagate to main so the
+        # repo file matches the published release (the tag itself already has it).
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add CHANGELOG.md
           git diff --staged --quiet || git commit -m "docs: changelog ${GITHUB_REF_NAME} [skip ci]"
-          git push origin "HEAD:main"
+          # retry loop: two concurrent tag pushes race the commit-back on main
+          for i in 1 2 3; do git push origin "HEAD:main" && break; git pull --rebase --autostash origin main || true; sleep 5; done
