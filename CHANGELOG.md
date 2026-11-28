@@ -6,6 +6,20 @@ where each release also carries the built boot images as downloadable assets.
 
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## v0.11.1-test
+
+**2026-11-28** · [compare changes](https://github.com/DevHamid/wayne-openwrt/compare/v0.11.0...v0.11.1-test)
+
+### 🩹 Fixes
+
+- 🤖 **ci:** build-2410 provenance guard pins the v2 (sfr-v2) baseline, not v0.9.16 adios ([`6926748`](https://github.com/DevHamid/wayne-openwrt/commit/6926748e0158fb5064ba79bf128aee1317ed38a0))
+- 🏷️ **release:** accept unbracketed changelog heading in release-note extractor ([`723e4d4`](https://github.com/DevHamid/wayne-openwrt/commit/723e4d43c3fe5fe95392a5d22024efe405f9bf96))
+- 🤖 **ci:** revert build-2410 guard to adios baseline (v2 kernel exceeds 32MiB boot) ([`e745c48`](https://github.com/DevHamid/wayne-openwrt/commit/e745c4817a32dbd8962792b99640cb9a0a6e557c))
+
+### ❤️ Contributors
+
+- shifu
+
 ## v0.11.0
 
 **2026-11-28** · [compare changes](https://github.com/DevHamid/wayne-openwrt/compare/wayne-24.10-diagd-20261127-1418...v0.11.0)
