@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 584 308" width="584" height="308" role="img" aria-labelledby="activity-t activity-d">
 <title id="activity-t">Commit activity</title>
-<desc id="activity-d">Commit activity per day from 2026-06-01 to 2026-11-29: 201 commits across 29 active days, peak 25 in one day.</desc>
+<desc id="activity-d">Commit activity per day from 2026-06-01 to 2026-11-29: 205 commits across 29 active days, peak 25 in one day.</desc>
 <rect width="584" height="308" fill="#2d3142"/>
 <text x="24" y="32" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="10" text-anchor="start" font-weight="500" letter-spacing="1.8" fill="#bfc0c0">ACTIVITY · REPO-DOCS-PIPELINE</text>
 <text x="24" y="68" font-family="Georgia, 'Times New Roman', 'Liberation Serif', serif" font-size="26" text-anchor="start" fill="#f5f5f5">Commit activity</text>
@@ -191,7 +191,7 @@
   <rect x="532" y="136" width="16" height="16" rx="3" fill="#f08a59"><title>2026-11-25: 12 commits</title></rect>
   <rect x="532" y="156" width="16" height="16" rx="3" fill="#c47a52"><title>2026-11-26: 4 commits</title></rect>
   <rect x="532" y="176" width="16" height="16" rx="3" fill="#f08a59"><title>2026-11-27: 17 commits</title></rect>
-  <rect x="532" y="196" width="16" height="16" rx="3" fill="#95614a"><title>2026-11-28: 1 commit</title></rect>
+  <rect x="532" y="196" width="16" height="16" rx="3" fill="#c47a52"><title>2026-11-28: 5 commits</title></rect>
   <rect x="532" y="216" width="16" height="16" rx="3" fill="#3b4056" stroke="rgba(245,245,245,0.12)" stroke-width="1"><title>2026-11-29: 0 commits</title></rect>
   <text x="24" y="108" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="10" text-anchor="end" fill="#bfc0c0">Mon</text>
   <text x="24" y="148" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="10" text-anchor="end" fill="#bfc0c0">Wed</text>
@@ -203,5 +203,5 @@
   <rect x="128" y="264" width="16" height="16" rx="3" fill="#c47a52"><title>6-9 commits/day</title></rect>
   <rect x="148" y="264" width="16" height="16" rx="3" fill="#f08a59"><title>10+ commits/day</title></rect>
   <text x="172" y="276" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="10" text-anchor="start" fill="#bfc0c0">more</text>
-  <text x="24" y="292" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="11" text-anchor="start" fill="#b0b8c6">201 commits · 29 active days · peak 25/day · 2026-06-01 → 2026-11-28</text>
+  <text x="24" y="292" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="11" text-anchor="start" fill="#b0b8c6">205 commits · 29 active days · peak 25/day · 2026-06-01 → 2026-11-28</text>
 </svg>
