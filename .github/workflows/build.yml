@@ -1118,7 +1118,12 @@ jobs:
           import os, re, pathlib
           tag = os.environ['GITHUB_REF_NAME']
           text = pathlib.Path('CHANGELOG.md').read_text()
-          m = re.compile(r'^## \[' + re.escape(tag) + r'\]', re.M).search(text)
+          # Accept both heading forms the changelog has used: the current generator
+          # writes '## v0.11.0' (unbracketed) while older hand-cut tags used
+          # '## [v0.11.0] — …'. If neither matches, fall back to publishing the whole
+          # file rather than an empty body.
+          m = (re.compile(r'^## \[' + re.escape(tag) + r'\]', re.M).search(text)
+               or re.compile(r'^## ' + re.escape(tag) + r'\s*$', re.M).search(text))
           if m:
               nxt = re.compile(r'^## ', re.M).search(text, m.end())
               body = text[m.start(): nxt.start() if nxt else len(text)].strip()
