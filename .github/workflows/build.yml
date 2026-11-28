@@ -1041,8 +1041,19 @@ jobs:
   # Why: previously a tag triggered a second full ~15 min kernel build of a
   # commit that main had already built -- same SHA, two compiles, wasted runner
   # minutes. Now one commit = at most one build.
+  # DISABLED (2026-11-28, tag-trigger wiring). This job fired on every `v*` tag
+  # and (a) failed -- it reuses the 21.02 `wayne-openwrt` artifact and greps for
+  # `wayne-openwrt-rom*.zip`, which the 24.10 flow no longer produces (run
+  # 46119770148: "no valid artifacts found to download"), and (b) raced docs.yml
+  # to write the release BODY from CHANGELOG.md, violating the one-owner rule
+  # (docs.yml `changelog` owns the body). The 24.10 flashable ROM now ships via
+  # build-2410-split-rom.yml, which triggers on the same `v*` tags, produces the
+  # `wayne-openwrt-2410-rom` artifact, and ATTACHES it to the docs.yml release.
+  # Kept (not deleted) so the 21.02 packaging + QRTR gate can be revived; flip
+  # this `if:` back to `startsWith(github.ref, 'refs/tags/v')` to re-enable --
+  # but first drop its release-body step so it never again races docs.yml.
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: ${{ false }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

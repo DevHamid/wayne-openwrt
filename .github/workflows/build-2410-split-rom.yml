@@ -15,6 +15,12 @@ on:
         description: Release tag the ROM assets will live under; needed for an online OTA manifest (empty = offline manifest only)
         required: false
         default: ''
+  push:
+    # Single push block: `tags` is the only key, so a `v*` tag push triggers this
+    # workflow directly (GitHub ANDs branches+paths+tags WITHIN one block, but a
+    # lone key just matches that ref kind). Kept as ONE `push:` key -- a duplicate
+    # `push:` key would silently drop one of them in YAML.
+    tags: ["v*"]
 
 permissions:
   contents: write
@@ -23,12 +29,18 @@ permissions:
 jobs:
   rom:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    # 25 min was enough for dispatch (source_run pre-resolved). A `v*` tag push
+    # has to WAIT for the kernel build of the tagged commit to go green first
+    # (same reuse-don't-rebuild contract as build.yml's release job), so allow
+    # up to ~35 min of polling on top of the ~15 min assembly.
+    timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
+      # dispatch: caller-supplied. tag push: empty inputs, so fall back to the
+      # pushed tag name (refs/tags/vX -> vX) for the OTA manifest + release.
       SOURCE_RUN: ${{ inputs.source_run }}
       SOURCE_SHA: ${{ inputs.source_sha }}
-      RELEASE_TAG: ${{ inputs.release_tag }}
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
 
@@ -36,6 +48,38 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq cpio zip unzip
+
+      # A tag push carries no `source_run` input, so resolve it from the tag's
+      # own commit: reuse the successful kernel (`wayne-openwrt`) artifact built
+      # for this exact SHA. Mirrors build.yml's release job -- one commit = one
+      # kernel compile, the ROM job never recompiles.
+      - name: Resolve source kernel run (tag push)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SHA="$GITHUB_SHA"
+          echo "Tag $GITHUB_REF_NAME -> commit $SHA; waiting for its kernel build."
+          RUN_ID=""
+          for i in $(seq 1 70); do
+            RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" \
+              --workflow build.yml --limit 30 \
+              --json databaseId,event,status,conclusion \
+              --jq '[.[] | select(.event=="push" and .conclusion=="success"
+                                  and .databaseId != (env.GITHUB_RUN_ID|tonumber))][0].databaseId' \
+              2>/dev/null || true)
+            if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
+              echo "Reusing kernel build run $RUN_ID"; break
+            fi
+            echo "[$((i*30))s] still waiting for a green kernel build of $SHA…"
+            sleep 30
+          done
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+            echo "::error::No successful build.yml run found for $SHA after ~35 min. Push main (green kernel build) first, then tag that commit."
+            exit 1
+          fi
+          echo "SOURCE_RUN=$RUN_ID" >> "$GITHUB_ENV"
 
       - name: Verify source run and kernel provenance
         run: |
@@ -71,7 +115,13 @@ jobs:
           if ! grep -qx 'qrtr_registry=present' "$KS"; then
             echo "::warning::source kernel has no in-kernel QRTR service registry."
             echo "Modem stability no longer depends on it: the diag-starvation root cause was 'nobody reads /dev/diag on OpenWrt', fixed by the persistent /dev/diag reader (repo commit 014b0572), and the clean adios-wayne kernel with that reader is verified stable on device (35+ min, F=0 S=0, across a reboot) with QRTR service discovery served by the userspace qrtr-ns."
-            echo "Proceeding with the assembly; the modem-stability gate is the on-device soak, re-verified after every flash."
+            # adios-wayne (the shipping baseline) is registry-absent BY DESIGN --
+            # discovery is served by userspace qrtr-ns. Failing closed here would
+            # block EVERY v* release built from the verified baseline, so this is
+            # a warning, not a gate: proceed on BOTH dispatch and tag push. The
+            # real modem-stability gate is the on-device soak, re-verified after
+            # every flash.
+            echo "Proceeding with the assembly (registry-absent baseline is the shipping default); the modem-stability gate is the on-device soak, re-verified after every flash."
           else
             echo 'PASS: QRTR service registry present in the reused kernel'
           fi
@@ -236,8 +286,34 @@ jobs:
             build/rom/system/rootfs.tar.gz
             build/bootstrap-initramfs.cpio.gz
 
-      - name: Publish release (if tag provided)
-        if: inputs.release_tag != ''
+      # v* TAG push: docs.yml's `changelog` job is the SOLE owner of the release
+      # body (generated release notes). This workflow only ATTACHES the flashable
+      # ROM assets to the release docs.yml created -- it never creates the release
+      # nor writes the body, so the two never both own it. Assets may be uploaded
+      # before docs.yml has created the release, so poll for it, then attach.
+      - name: Attach ROM to the release (tag push)
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          for i in $(seq 1 40); do
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "release $TAG exists; uploading ROM assets"
+              gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+                build/wayne-openwrt-rom.zip \
+                build/rom-boot.img \
+                build/MANIFEST \
+                build/rom/system/rootfs.tar.gz
+              exit 0
+            fi
+            echo "[$((i*15))s] release $TAG not created yet (docs.yml owns the body)…"
+            sleep 15
+          done
+          echo "::warning::release $TAG not found after ~10 min; ROM artifact is still available under this workflow run's artifacts."
+      - name: Publish release (dispatch with release_tag only)
+        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.release_tag }}
