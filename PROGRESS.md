@@ -9,21 +9,62 @@ This page is the plain-English progress report. The technical details live in th
 
 | Area | Status |
 |---|---|
-| OpenWrt boots on the phone | ✅ Working |
+| OpenWrt boots on the phone | ✅ Working — **clean recovery flash validated** |
 | Remote access (SSH over the USB cable) | ✅ Working, reliable |
 | **Phone modem stays alive** (no more crash loop) | ✅ **Fixed and verified** |
-| **Modem registered on the cellular network** | ✅ Working |
-| **LTE data connection (internet over the modem)** | 🔧 Fix built into the image; awaiting test on the phone |
+| **Modem registered on the cellular network** | 🟡 **Blocked — signal appears but stuck "searching"** |
+| **LTE data connection (internet over the modem)** | 🚧 **Blocked — needs a kernel fix + ROM rebuild** |
 | Full low-level modem control (QMI) from OpenWrt | ✅ Working |
 | Serial debug console over the same USB cable | ✅ Working |
-| ModemManager (the standard Linux modem service) | 🟡 Built into the ROM, being tested |
+| ModemManager (the standard Linux modem service) | 🟡 Built into the ROM; pairs control side, blocked on data side |
 | Wi-Fi (the phone's own radio) | 🔧 Blocked — kernel loads the Wi-Fi driver too early; corrected build running |
-| Automatic OTA updates | 🟡 Pipeline ready |
+| Automatic OTA updates | 🟠 **Restricted — only within an already-installed baseline** |
 
-**The headline:** the phone's modem used to crash every ~30 seconds. We found the exact cause
-(the modem's diagnostic stream had no reader on the OpenWrt side, so the modem choked on its own
-backlog) and fixed it. The modem now runs **stable for hours**, and it **registers on the cellular
-network** — the hardest modem work is behind us.
+**The headline:** the flashable ROM now **installs cleanly from recovery and boots** — that is the
+validated baseline. The modem's data connection is still blocked, and we now know *exactly* why: the
+modem's data port is set up in a way the standard Linux software refuses to touch, and the fix has to
+happen in the phone's low-level kernel (a rebuilt image), not in a settings file. Separately, even the
+modem's *registration* now needs attention — it finds signal but can't finish connecting to the network.
+
+---
+
+## 🆕 Latest update (Nov 28, later) — the ROM installs cleanly, and we know exactly what's blocking the modem
+
+**The good news first: the flashable image now installs the right way and boots.** We put it on the
+phone through its recovery mode (the same way you'd install a custom system on any old Android phone)
+and it came up cleanly — the router system started, and we could reach it over the USB cable. That
+clean install is now our **reference baseline**: it's the known-good starting point for everything else.
+
+**We also cleared up an old misunderstanding.** For a while we thought a certain combination of
+phone software and router version caused the phone to hang on startup. It didn't. The hangs happened
+because our **over-the-air updater was layering a new system on top of a *different* one**, leaving a
+half-and-half mix that couldn't boot. That's an updater bug, not a compatibility wall. The rule now:
+the first install of a new baseline always goes through recovery; the over-the-air updater is only for
+updating a phone that already runs that same baseline.
+
+**On the modem's data connection, we now have the complete answer — and it's a harder one.** The
+standard Linux modem software still won't set up the modem's data side (the part that carries internet
+traffic). We traced every escape route and each one is closed:
+
+- The modem's data port is created in a way Linux treats as a **"phantom" network device with no real
+  hardware behind it**, and the software **refuses to use phantom devices** on principle.
+- Normally a set of helper rules would tag the port as real, but **those helpers aren't installed** on
+  the phone, so the tagging never happens.
+- The software's own manual-reporting tool **can't carry the needed label** (it only accepts a short
+  list of fields), and **no settings flag can override** the phantom-device refusal.
+
+**What this means:** the fix isn't a settings tweak or a config file — the modem's data port has to be
+set up properly at the **low-level kernel** layer, which means **building a new flashable image**.
+That's more work than we'd hoped, but it's a known, buildable path rather than a mystery.
+
+**One more thing to solve: the modem isn't finishing its connection to the network.** The modem's
+control side was stuck shutting down; when we forced it awake, it found a **cell signal** but then sat
+**"searching"** without ever connecting, and the SIM never finished activating. So registration is now
+its own blocker, separate from the data-port issue above. We're tracking both.
+
+**Honest status:** the clean-install baseline is **proven on the real phone**. The data-port root cause
+is **fully diagnosed** but the fix is **not built yet** (it needs a kernel change and a rebuild). The
+registration problem is **reproduced and measured** but **not yet solved**.
 
 ---
 
@@ -214,13 +255,17 @@ is ordinary engineering.
 
 ## 🔜 What's next
 
-1. **Get Wi-Fi up** — flash the corrected kernel, confirm a Wi-Fi interface appears. This is the
-   current blocker and the whole point of the next device session.
-2. **Turn on the LTE data connection** — make the connection manager see the modem's data port,
-   then run a small real-traffic test.
-3. **Add the dashboard** — a page to see signal, data usage and control the link, once there is a
+1. **Get the modem to finish registering** — it finds a cell signal but stays stuck "searching" and
+   the SIM never finishes activating. This is now the **first gate**: nothing else on the modem works
+   until it actually connects to the network.
+2. **Unblock the LTE data connection (kernel fix + rebuilt image)** — set the modem's data port up
+   properly at the low-level kernel layer so the standard software stops refusing it, then rebuild and
+   reflash. Once registered, this is what turns the phone into a real hotspot.
+3. **Get Wi-Fi up** — flash the corrected kernel so the Wi-Fi driver loads at the right time and a
+   Wi-Fi interface appears.
+4. **Add the dashboard** — a page to see signal, data usage and control the link, once there is a
    working connection behind it.
-4. **Polish**: Docker support, kernel tuning, and the automatic update pipeline.
+5. **Polish**: kernel tuning, and the automatic update pipeline (kept to same-baseline updates only).
 
 ---
 

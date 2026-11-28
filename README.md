@@ -5,7 +5,7 @@
 **Vision / definition of done:** phone = pocket modem + services box, finished entirely on vendor kernel 4.19 + ImmortalWrt **24.10** (OpenWrt fork). **The finish line = a flashable OpenWrt ROM installable from TWRP/OrangeFox (recovery zip) — no PC, no fastboot.** Mainline kernel + OpenWrt 25/newest are a *future* track after v1.0 (mainline still buggy: partial modem, broken power management — moving now would break more than it fixes).
 
 
-## LTE data call (pocket modem) — net-port blocker (2026-11-28)
+## LTE data call (pocket modem) — net-port blocker (2026-11-28, ROOT CAUSE COMPLETE — fix is KERNEL-side)
 
 Control channel is up and verified: MM builds the `qrtr/qrtr0` control port and
 enumerates the full bus (qrtr-ns + `WITH_QRTR`, both on-device). The modem is
@@ -13,12 +13,62 @@ then disposed on the **net port**: `Failed to find a net port in the QMI modem`
 (raised at `mm-broadband-modem.c constructed()`, lines 1610-1615, when the QMI
 modem has zero admitted NET ports).
 
-Cause: `rmnet_ipa0` is a parentless virtual netdev (`/sys/devices/virtual/net/`,
-no `device` parent, no driver string), so `mm_kernel_device_get_driver` returns
-empty and `peek_port_qmi_for_data`'s `driver == "ipa"` compare never matches —
-the IPA data branch is never entered. Fix target: select/tag `rmnet_ipa0` by
-**name** as the IPA data candidate. Still Option A (MM plugin, swappable .ipk,
-no kernel, reversible). Traceable on Kanban t_7236fbfd.
+Complete cause chain (closed 2026-11-28, supersedes every earlier theory below):
+`rmnet_ipa0` **exists** but is a **driver-less VIRTUAL netdev** — it lives under
+`/sys/devices/virtual/net/` with **no `device` symlink** and therefore no driver
+string. MM 1.22's port filter rejects it outright with
+`port filtered: virtual device` (the filter keys off the sysfs path, not the
+name), so the IPA data branch is never entered. Three escape hatches were each
+ruled out on device:
+1. **udev rules can't save it** — `77-mm-qcom-soc.rules` (which matches
+   `DRIVERS=="ipa"`) never applies because **no `udevd`/`udevadm` is installed**
+   in the ROM, so nothing replays the driver tag onto the virtual netdev.
+2. **`mmcli --report-kernel-event` can't save it** — its whitelist is
+   `action,name,subsystem,uid` only; there is no field that carries a driver.
+3. **No `ID_MM_` udev property lifts the virtual filter** — the virtual check is
+   derived from the sysfs path, so no userspace property overrides it.
+
+**Fix is KERNEL-side:** the IPA netdev must be made **non-virtual** (carry a
+real device/driver parent) so it stops matching MM's virtual-device filter.
+That is a **ROM rebuild**, not a swappable package. Traceable on Kanban
+t_7236fbfd (net-port) and t_9e47eef9 (registration gate).
+
+## Current status (updated 2026-11-28, latest — ROM VALIDATED via recovery flash; MM net-port root cause CLOSED, fix is kernel-side; registration is the new gate)
+
+- **2026-11-28 — the flashable ROM is VALIDATED end-to-end from a clean recovery flash.**
+  `wayne-openwrt-rom.zip` installed via **OrangeFox recovery** boots clean to
+  **ImmortalWrt 24.10.4** on kernel **`4.19.325-LKGeek-devhamid-remastered`**, with
+  **SSH over USB-ECM up**. This is the clean-baseline proof: recovery flash (boot +
+  system written together) is the validated install path.
+
+- **2026-11-28 — WEDGE RE-ATTRIBUTED: the boot-hang was a CROSS-BASELINE OTA, not the
+  adios-kernel + 24.10 combination.** The earlier "adios-k+24.10 WEDGE" claim is **withdrawn**.
+  Root cause: `install-rom.sh` **tar-overwrites the live root in place**, so running it onto a
+  *different* baseline leaves a **mixed rootfs** (new archive members layered over a foreign
+  tree) — that mixed state is what hung, and it is an installer/OTA defect, not a kernel+rootfs
+  incompatibility. The OTA install tar overlay does **not** delete files absent from the archive,
+  so stale `rc.d` symlinks survive and must be removed explicitly. **New rule: the baseline is
+  established by recovery flash ONLY**; OTA is only for updating within an already-matching
+  baseline. This corrects the board/memory wedge matrix.
+
+- **2026-11-28 — MM net-port root cause is now COMPLETE, and the fix is KERNEL-side (ROM rebuild),
+  not the build-side `patch_ipa_netport` patch recorded below.** `rmnet_ipa0` exists but is a
+  **driver-less virtual netdev** (`/sys/devices/virtual/net/`, no `device` symlink, no driver
+  string); MM 1.22 rejects it with **`port filtered: virtual device`** and never enters the IPA
+  data branch, so the `qcom-soc` plugin aborts with `Failed to find a net port in the QMI modem`.
+  All three userspace escape hatches were ruled out on device: `77-mm-qcom-soc.rules`
+  (`DRIVERS=="ipa"`) never applies (**no `udevd`/`udevadm` installed**); `mmcli
+  --report-kernel-event` whitelist is `action,name,subsystem,uid` only (no driver field); and no
+  `ID_MM_` property lifts the virtual filter (it is derived from the sysfs path). The build-side
+  `patch_ipa_netport()` mux-allowlist theory below is therefore **superseded** — the mux filter was
+  not the operative gate, the virtual-device filter is. **Fix:** make the IPA netdev non-virtual in
+  the kernel so it carries a real device/driver parent → **ROM rebuild**. Card **`t_7236fbfd`**.
+
+- **2026-11-28 — REGISTRATION is now the gate (was: net-port only).** The modem DMS was found in
+  **`shutting-down`**; forcing it **online** brings up GSM signal (**`-94 dBm`**), but the modem
+  stays stuck **`not-registered-searching`**, the SIM app stays at **`detected`** (never
+  `initialized`), and **no provisioning session** is established. So even with the net-port
+  unblocked, the modem will not register until this is resolved. Card **`t_9e47eef9`**.
 
 ## Current status (updated 2026-11-27, latest — DIAG DRAIN FIXED, verified on device)
 
