@@ -52,7 +52,11 @@ jobs:
       # A tag push carries no `source_run` input, so resolve it from the tag's
       # own commit: reuse the successful kernel (`wayne-openwrt`) artifact built
       # for this exact SHA. Mirrors build.yml's release job -- one commit = one
-      # kernel compile, the ROM job never recompiles.
+      # kernel compile, the ROM job never recompiles. Filter headBranch=="main"
+      # because pushing the tag ALSO fires build.yml (it lists tags: ['v*']),
+      # but both its jobs skip there -- that run concludes "success" yet builds
+      # nothing, and being newer it would otherwise be picked first (gh run list
+      # is newest-first), yielding "no valid artifacts found to download".
       - name: Resolve source kernel run (tag push)
         if: startsWith(github.ref, 'refs/tags/')
         env:
@@ -65,8 +69,9 @@ jobs:
           for i in $(seq 1 70); do
             RUN_ID=$(gh run list --repo "$GITHUB_REPOSITORY" --commit "$SHA" \
               --workflow build.yml --limit 30 \
-              --json databaseId,event,status,conclusion \
-              --jq '[.[] | select(.event=="push" and .conclusion=="success"
+              --json databaseId,event,status,conclusion,headBranch \
+              --jq '[.[] | select(.event=="push" and .headBranch=="main"
+                                  and .conclusion=="success"
                                   and .databaseId != (env.GITHUB_RUN_ID|tonumber))][0].databaseId' \
               2>/dev/null || true)
             if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
