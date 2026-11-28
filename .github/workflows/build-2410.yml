@@ -34,11 +34,13 @@ jobs:
           import json
           run = json.load(open('source-run.json'))
           assert run['conclusion'] == 'success', 'Source run did not pass'
-          # v2 baseline (debug/wayne-wlan-sfr-v2 @ f997eb3): carries the in-kernel QRTR
-          # service registry (qrtr_registry=present) that the adios-wayne kernel lacks,
-          # and is the wedge-free kernel for the 24.10 rootfs (adios+2410 wedges). This
-          # supersedes the older v0.9.16 adios pin once that baseline moved to v2.
-          assert run['head_sha'] == 'f09951033ca2a273804d5284da9029ad492be297', 'Source kernel provenance differs from the locked v2 (sfr-v2) baseline'
+          # Keep the device-tested adios-wayne baseline pin. The 32 MiB boot partition is a
+          # hard limit: the v2 (sfr-v2) kernel's Image.gz-dtb packs a boot image that exceeds
+          # it (its initramfs carries the qcacld WLAN module), so only adios fits. adios+24.10
+          # is also the combination every green build-2410 run uses and the device-tested
+          # baseline. The IPA netdev fix under test is a rootfs change and is independent of
+          # the kernel, so adios is correct here.
+          assert run['head_sha'] == '3ad6c6307ed16bbef21353bc342ec3f1d1138f0f', 'Source kernel provenance differs from device-tested v0.9.16'
           print('Reusing device-tested kernel artifact from', run['html_url'])
           PY
           gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" -n wayne-openwrt -D main-artifact
