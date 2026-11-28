@@ -185,18 +185,35 @@ def patch_ipa_netport(root):
     text = common.read_text()
     if 'rmnet_ipa' in text:
         return  # already patched
-    old = '\t\t\t*)\n\t\t\t\treturn 1\n\t\t\t\t;;\n'
-    new = ('\t\t\t# IPA data port of the built-in Qualcomm SoC modem (sdm660):\n'
-           '\t\t\t# must be reported so the qcom-soc plugin pairs it with the QMI\n'
-           '\t\t\t# control port and runs the IPA DPM Open Port TX/RX binding.\n'
-           '\t\t\t"rmnet_ipa"*)\n'
-           '\t\t\t\tmm_log "debug" "IPA netdevice $name"\n'
-           '\t\t\t\t;;\n'
-           '\t\t\t*)\n'
-           '\t\t\t\treturn 1\n\t\t\t\t;;\n')
-    if old not in text:
+    comment = ('# IPA data port of the built-in Qualcomm SoC modem (sdm660):\n'
+               '# must be reported so the qcom-soc plugin pairs it with the QMI\n'
+               '# control port and runs the IPA DPM Open Port TX/RX binding.\n')
+    # Anchor on the stable mux-allowlist arms (qmapmux/qmimux/mbimmux) and insert the
+    # `rmnet_ipa*` case just before the catch-all `*)` fallthrough. Tolerant of the
+    # quoting/indentation differences between ModemManager releases: match the mux
+    # arms with flexible whitespace and either quote style, then reuse whatever
+    # indentation the surrounding case arms use. This sits only inside
+    # `mm_report_event()`'s virtual-netdev block, so `return 1` elsewhere is untouched.
+    arm_re = (r'([ \t]*)(["\']?)(qmapmux)(["\']?)([ \t]*\*[ \t]*\)\n)'
+              r'(?:.*?\n)*?[ \t]*;;[ \t]*\n'
+              r'[ \t]*\*[ \t]*\)[ \t]*\n[ \t]*return 1[ \t]*\n')
+    m = re.search(arm_re, text)
+    if not m:
         raise ValueError('mux-allowlist fallthrough not found; upstream file changed')
-    common.write_text(text.replace(old, new, 1))
+    indent = m.group(1)
+    insert = (f'{indent}"rmnet_ipa"*)\n'
+              f'{indent}\tmm_log "debug" "IPA netdevice $name"\n'
+              f'{indent}\t;;\n')
+    head = text[:m.end(5)]  # up to and including the closing `)` of the last mux arm
+    # Rebuild: everything through the last mux arm's `;;`, then the new case, then
+    # the original catch-all `*)\n return 1`. Re-split on the first mux arm onward.
+    tail = text[m.end(5):]
+    # Find the `;;` that closes the mbimmux arm (the last before the catch-all).
+    semi = re.search(r'[ \t]*;;[ \t]*\n(?=[ \t]*\*[ \t]*\))', tail)
+    if not semi:
+        raise ValueError('could not locate mux-arm terminator; upstream file changed')
+    new_text = text[:m.start()] + text[m.start():m.end(5)] + tail[:semi.end()] + indent + comment.replace('\n', '\n' + indent).rstrip('\n') + '\n' + insert + tail[semi.end():]
+    common.write_text(new_text)
 
 
 def install_modem(root):
