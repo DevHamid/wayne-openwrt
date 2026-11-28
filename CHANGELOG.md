@@ -6,6 +6,29 @@ where each release also carries the built boot images as downloadable assets.
 
 The format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## v0.11.0
+
+**2026-11-28** · [compare changes](https://github.com/DevHamid/wayne-openwrt/compare/wayne-24.10-diagd-20261127-1418...v0.11.0)
+
+### 🩹 Fixes
+
+- 🤖 **ci:** changelog commit-back checks out fresh main, not the tag ([`2131721`](https://github.com/DevHamid/wayne-openwrt/commit/21317215eecd9f2126b4415336ecc3a2ccbfcb9d))
+- 🤖 **ci:** grant changelog job workflows:write for commit-back on moving main ([`5f8f6a9`](https://github.com/DevHamid/wayne-openwrt/commit/5f8f6a9d95daed00743f5eb80c2edcc077f67696))
+- 🤖 **ci:** patch_ipa_netport anchors on mbimmux arm, not return form ([`68f7348`](https://github.com/DevHamid/wayne-openwrt/commit/68f7348c87ad124e47afb0d9b567ef12dfd7b1cf))
+- 📡 **modem:** report IPA netdev rmnet_ipa0 to ModemManager hotplug ([`6aa66f2`](https://github.com/DevHamid/wayne-openwrt/commit/6aa66f2453ee8034368b674faf2923597f3a8cc7))
+- 🤖 **ci:** split tag trigger so v* tag pushes actually run docs ([`7b39076`](https://github.com/DevHamid/wayne-openwrt/commit/7b39076e8ab31ad08bb17f54b66aa689c9dd4af6))
+- 🤖 **ci:** make patch_ipa_netport tolerant of MM release quoting/indent variants ([`d974f02`](https://github.com/DevHamid/wayne-openwrt/commit/d974f02650f7746ab84a44313056b26384dfc8d7))
+
+### 📖 Documentation
+
+- modem DIAG drain fixed and verified on device (t_089e0a03 closed) ([`0f0d318`](https://github.com/DevHamid/wayne-openwrt/commit/0f0d318c917e704c62cafe1df854f45e6ed7b326))
+- add pocket-modem progress + technical net-port blocker ([`8176df0`](https://github.com/DevHamid/wayne-openwrt/commit/8176df07e6c6664a6dc4b5f238125ad033a4d742))
+- radio power-state fix + registration bottleneck (consumer progress) ([`a345c2d`](https://github.com/DevHamid/wayne-openwrt/commit/a345c2d2a2e8d73cef32feb2eab6fa74c08e0c6e))
+
+### ❤️ Contributors
+
+- shifu
+
 ## [v0.9.10] — M7 probe script
 
 `scripts/m7-docker-probe.sh` → `/root/m7.sh` (installed by `build.yml`, re-copied
